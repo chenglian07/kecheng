@@ -1,0 +1,15 @@
+# ESP-IDF build output
+build/
+sdkconfig
+sdkconfig.old
+
+# Secrets (user-specific credentials)
+firmware/main/secrets.h
+
+# IDE / OS
+.vscode/settings.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

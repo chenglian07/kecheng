@@ -5,6 +5,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "qma7981.h"
+#include "wifi_conn.h"
+#include "http_post.h"
 
 /* secrets.h 由使用者从 secrets_template.h 复制并填充 */
 #include "secrets.h"
@@ -45,11 +47,47 @@ static void print_json(const qma7981_accel_t *accel, const char *status)
            status);
 }
 
+/* ---------- HTTP POST JSON 上传 ---------- */
+
+static void upload_sensor_data(const qma7981_accel_t *accel)
+{
+    if (!wifi_is_connected()) {
+        return;
+    }
+
+    /* 构建 JSON 字符串 */
+    double ts_device = (double)esp_timer_get_time() / 1.0e6;
+    char json[256];
+    int n = snprintf(json, sizeof(json),
+        "{\"device_id\":\"%s\","
+        "\"sensor\":\"qma7981\","
+        "\"ts_device\":%.3f,"
+        "\"ax\":%.4f,\"ay\":%.4f,\"az\":%.4f,"
+        "\"unit\":\"g\","
+        "\"raw\":[%d,%d,%d]}",
+        DEVICE_ID, ts_device,
+        (double)accel->ax, (double)accel->ay, (double)accel->az,
+        accel->raw_x, accel->raw_y, accel->raw_z);
+
+    if (n >= (int)sizeof(json)) {
+        ESP_LOGW(TAG, "JSON buffer too small, truncated");
+    }
+
+    /* 构建完整 URL 并发送 */
+    char url[128];
+    snprintf(url, sizeof(url), "%s/api/ingest", SERVER_BASE_URL);
+
+    esp_err_t ret = http_post_json(url, json);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "upload failed");
+    }
+}
+
 /* ---------- 主程序 ---------- */
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== KECHENG Week1 Phase1 ===");
+    ESP_LOGI(TAG, "=== KECHENG Week1 Phase2 ===");
     ESP_LOGI(TAG, "device_id = %s", DEVICE_ID);
     ESP_LOGI(TAG, "I2C: SDA=GPIO4  SCL=GPIO5  target addr=0x%02X", QMA7981_ADDR);
 
@@ -79,16 +117,29 @@ void app_main(void)
         ESP_LOGI(TAG, "QMA7981 CHIP_ID = 0x%02X (unexpected, but non-zero)", chip_id);
     }
 
-    /* ---- 4. 循环读取加速度并输出 JSON ---- */
+    /* ---- 4. 连接 WiFi ---- */
+    ESP_LOGI(TAG, "connecting WiFi...");
+    ret = wifi_connect(20000);  /* 最多等 20 秒 */
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi connect failed, continue without network");
+    } else {
+        ESP_LOGI(TAG, "WiFi connected");
+    }
+
+    /* ---- 5. 循环读取加速度 + 串口输出 + HTTP 上传 ---- */
     ESP_LOGI(TAG, "--- start periodic reading (1s interval) ---");
-    vTaskDelay(pdMS_TO_TICKS(100)); /* 跳过启动不稳定读数 */
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     while (1) {
         qma7981_accel_t accel;
         ret = qma7981_read_accel(&accel);
 
         if (ret == ESP_OK) {
+            /* 串口输出 JSON */
             print_json(&accel, "ok");
+
+            /* HTTP 上传 */
+            upload_sensor_data(&accel);
         } else {
             qma7981_accel_t dummy = {0};
             print_json(&dummy, "read_error");

@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KECHENG 传感器仪表盘</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #333; min-height: 100vh; }
+  .container { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 20px; }
+
+  /* Status bar */
+  .status-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #fff; border-radius: 10px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-size: 13px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+  .status-dot.online { background: #22c55e; }
+  .status-dot.offline { background: #ef4444; }
+  .status-text { color: #666; }
+  .status-text strong { color: #333; }
+  .last-update { margin-left: auto; color: #999; font-size: 12px; }
+
+  /* Cards grid */
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .card { background: #fff; border-radius: 12px; padding: 18px 14px 14px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card .axis { font-size: 12px; color: #999; text-transform: uppercase; letter-spacing: 1px; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .card .unit { font-size: 13px; color: #888; margin-top: 2px; }
+  .card.axis-x .value { color: #3b82f6; }
+  .card.axis-y .value { color: #22c55e; }
+  .card.axis-z .value { color: #f59e0b; }
+
+  /* Raw values */
+  .raw-section { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .raw-section h3 { font-size: 13px; color: #999; margin-bottom: 6px; }
+  .raw-values { font-size: 14px; font-family: "SF Mono", Monaco, monospace; color: #666; }
+  .raw-values span { margin-right: 16px; }
+
+  /* Data table */
+  .table-section { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+  .table-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
+  .table-header h3 { font-size: 14px; }
+  .table-header select { font-size: 12px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: #f9fafb; padding: 10px 12px; text-align: left; font-weight: 600; color: #666; border-bottom: 1px solid #e5e7eb; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; font-family: "SF Mono", Monaco, monospace; }
+  tr:last-child td { border-bottom: none; }
+
+  .empty-msg { text-align: center; padding: 40px 16px; color: #999; }
+  .error-msg { text-align: center; padding: 16px; color: #ef4444; }
+
+  @media (max-width: 600px) {
+    .cards { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>KECHENG 传感器仪表盘</h1>
+  <p class="subtitle">ESP32-S3-EYE · QMA7981 三轴加速度</p>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="statusBar">
+    <span class="status-dot offline" id="statusDot"></span>
+    <span class="status-text" id="statusText">等待数据中...</span>
+    <span class="last-update" id="lastUpdate"></span>
+  </div>
+
+  <!-- Axis cards -->
+  <div class="cards">
+    <div class="card axis-x">
+      <div class="axis">Axis X</div>
+      <div class="value" id="valX">--</div>
+      <div class="unit">g</div>
+    </div>
+    <div class="card axis-y">
+      <div class="axis">Axis Y</div>
+      <div class="value" id="valY">--</div>
+      <div class="unit">g</div>
+    </div>
+    <div class="card axis-z">
+      <div class="axis">Axis Z</div>
+      <div class="value" id="valZ">--</div>
+      <div class="unit">g</div>
+    </div>
+  </div>
+
+  <!-- Raw values -->
+  <div class="raw-section">
+    <h3>原始值 (14-bit)</h3>
+    <div class="raw-values">
+      <span>X: <strong id="rawX">--</strong></span>
+      <span>Y: <strong id="rawY">--</strong></span>
+      <span>Z: <strong id="rawZ">--</strong></span>
+    </div>
+  </div>
+
+  <!-- Data table -->
+  <div class="table-section">
+    <div class="table-header">
+      <h3>历史记录</h3>
+      <div>
+        <label style="font-size:12px;color:#999;margin-right:6px;">设备</label>
+        <select id="deviceSelect" onchange="fetchData()">
+          <option value="">全部</option>
+          <option value="g02-s20251040108-esp32s3eye">g02-s20251040108-esp32s3eye</option>
+        </select>
+      </div>
+    </div>
+    <div id="tableBody">
+      <div class="empty-msg">暂无数据，等待板端上传...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const DEVICES = new Set();
+const TABLE = document.getElementById('tableBody');
+const STATUS_DOT = document.getElementById('statusDot');
+const STATUS_TEXT = document.getElementById('statusText');
+const LAST_UPDATE = document.getElementById('lastUpdate');
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '--';
+  const d = new Date(isoStr);
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function fmtTs(sec) {
+  if (sec == null) return '--';
+  const d = new Date(sec * 1000);
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+async function fetchData() {
+  try {
+    const device = document.getElementById('deviceSelect').value;
+    const url = '/api/data' + (device ? '?device_id=' + encodeURIComponent(device) : '');
+    const resp = await fetch(url);
+
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const body = await resp.json();
+
+    if (body.code !== 0) throw new Error('API error: ' + body.message);
+    const records = body.data || [];
+
+    // Update status
+    if (records.length > 0) {
+      STATUS_DOT.className = 'status-dot online';
+      STATUS_TEXT.innerHTML = '<strong>' + records[0].device_id + '</strong> 最后更新';
+      LAST_UPDATE.textContent = fmtTime(records[0].ts_server);
+
+      // Update latest values
+      const r = records[0];
+      document.getElementById('valX').textContent = r.ax.toFixed(4);
+      document.getElementById('valY').textContent = r.ay.toFixed(4);
+      document.getElementById('valZ').textContent = r.az.toFixed(4);
+      document.getElementById('rawX').textContent = r.raw_x;
+      document.getElementById('rawY').textContent = r.raw_y;
+      document.getElementById('rawZ').textContent = r.raw_z;
+
+      // Collect device IDs for filter
+      records.forEach(r => DEVICES.add(r.device_id));
+      updateDeviceSelect();
+    } else {
+      STATUS_DOT.className = 'status-dot offline';
+      STATUS_TEXT.textContent = '暂无数据';
+      LAST_UPDATE.textContent = '';
+      document.getElementById('valX').textContent = '--';
+      document.getElementById('valY').textContent = '--';
+      document.getElementById('valZ').textContent = '--';
+      document.getElementById('rawX').textContent = '--';
+      document.getElementById('rawY').textContent = '--';
+      document.getElementById('rawZ').textContent = '--';
+    }
+
+    // Build table
+    if (records.length === 0) {
+      TABLE.innerHTML = '<div class="empty-msg">暂无数据</div>';
+      return;
+    }
+
+    let html = '<table><thead><tr><th>时间</th><th>设备</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>状态</th></tr></thead><tbody>';
+    const maxRows = 50;
+    for (let i = 0; i < Math.min(records.length, maxRows); i++) {
+      const rec = records[i];
+      html += '<tr>' +
+        '<td>' + fmtTs(rec.ts_device) + '</td>' +
+        '<td>' + (rec.device_id || '') + '</td>' +
+        '<td>' + rec.ax.toFixed(4) + '</td>' +
+        '<td>' + rec.ay.toFixed(4) + '</td>' +
+        '<td>' + rec.az.toFixed(4) + '</td>' +
+        '<td>' + (rec.status || 'ok') + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    TABLE.innerHTML = html;
+
+  } catch (err) {
+    console.error('fetch error:', err);
+    STATUS_DOT.className = 'status-dot offline';
+    STATUS_TEXT.textContent = '连接失败: ' + err.message;
+    LAST_UPDATE.textContent = '';
+  }
+}
+
+function updateDeviceSelect() {
+  const sel = document.getElementById('deviceSelect');
+  const currentVal = sel.value;
+  const devices = Array.from(DEVICES).sort();
+  sel.innerHTML = '<option value="">全部</option>';
+  devices.forEach(d => {
+    const opt = document.createElement('option');
+    opt.value = d;
+    opt.textContent = d;
+    if (d === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// Auto-refresh every 5 seconds
+fetchData();
+setInterval(fetchData, 5000);
+</script>
+</body>
+</html>

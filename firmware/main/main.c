@@ -7,6 +7,7 @@
 #include "qma7981.h"
 #include "wifi_conn.h"
 #include "http_post.h"
+#include "cmd_poll.h"
 
 /* secrets.h 由使用者从 secrets_template.h 复制并填充 */
 #include "secrets.h"
@@ -87,7 +88,7 @@ static void upload_sensor_data(const qma7981_accel_t *accel)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== KECHENG Week1 Phase2 ===");
+    ESP_LOGI(TAG, "=== KECHENG Week2 ===");
     ESP_LOGI(TAG, "device_id = %s", DEVICE_ID);
     ESP_LOGI(TAG, "I2C: SDA=GPIO4  SCL=GPIO5  target addr=0x%02X", QMA7981_ADDR);
 
@@ -124,6 +125,8 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi connect failed, continue without network");
     } else {
         ESP_LOGI(TAG, "WiFi connected");
+        /* 启动命令轮询任务 */
+        cmd_poll_start();
     }
 
     /* ---- 5. 循环读取加速度 + 串口输出 + HTTP 上传 ---- */
@@ -131,6 +134,12 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(100));
 
     while (1) {
+        /* Week2: 如果周期上报被暂停，跳过本次上报但继续等待 */
+        if (cmd_is_reporting_paused()) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
         qma7981_accel_t accel;
         ret = qma7981_read_accel(&accel);
 

@@ -14,7 +14,7 @@
 
   /* Status bar */
   .status-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #fff; border-radius: 10px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); font-size: 13px; }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; flex-shrink: 0; }
   .status-dot.online { background: #22c55e; }
   .status-dot.offline { background: #ef4444; }
   .status-text { color: #666; }
@@ -37,6 +37,38 @@
   .raw-values { font-size: 14px; font-family: "SF Mono", Monaco, monospace; color: #666; }
   .raw-values span { margin-right: 16px; }
 
+  /* Action bar (Week2) */
+  .action-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s, opacity 0.15s; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #2563eb; }
+  .btn-warning { background: #f59e0b; color: #fff; }
+  .btn-warning:hover:not(:disabled) { background: #d97706; }
+  .btn-success { background: #22c55e; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #16a34a; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #dc2626; }
+
+  /* Command status (Week2) */
+  .cmd-status { background: #fff; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: none; }
+  .cmd-status.visible { display: block; }
+  .cmd-status h3 { font-size: 13px; color: #999; margin-bottom: 10px; }
+  .cmd-timeline { display: flex; align-items: center; gap: 0; font-size: 12px; }
+  .cmd-step { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
+  .cmd-step .step-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #d1d5db; background: #fff; }
+  .cmd-step.active .step-dot { border-color: #3b82f6; background: #3b82f6; }
+  .cmd-step.done .step-dot { border-color: #22c55e; background: #22c55e; }
+  .cmd-step.fail .step-dot { border-color: #ef4444; background: #ef4444; }
+  .cmd-step .step-label { color: #999; white-space: nowrap; font-size: 11px; }
+  .cmd-step.active .step-label { color: #3b82f6; font-weight: 600; }
+  .cmd-step.done .step-label { color: #22c55e; }
+  .cmd-step.fail .step-label { color: #ef4444; }
+  .cmd-connector { flex: 1; height: 2px; background: #d1d5db; min-width: 20px; }
+  .cmd-connector.done { background: #22c55e; }
+  .cmd-timer { font-size: 12px; color: #999; margin-top: 8px; }
+  .cmd-error { font-size: 12px; color: #ef4444; margin-top: 4px; }
+
   /* Data table */
   .table-section { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
   .table-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; }
@@ -45,14 +77,20 @@
 
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th { background: #f9fafb; padding: 10px 12px; text-align: left; font-weight: 600; color: #666; border-bottom: 1px solid #e5e7eb; }
-  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; font-family: "SF Mono", Monaco, monospace; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f3f4f6; font-family: "SF Mono", Monaco, monospace; font-size: 12px; }
   tr:last-child td { border-bottom: none; }
 
   .empty-msg { text-align: center; padding: 40px 16px; color: #999; }
   .error-msg { text-align: center; padding: 16px; color: #ef4444; }
 
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+  .badge-ok { background: #dcfce7; color: #16a34a; }
+  .badge-collect { background: #dbeafe; color: #2563eb; }
+
   @media (max-width: 600px) {
     .cards { grid-template-columns: 1fr; }
+    .cmd-timeline { font-size: 10px; }
+    .cmd-step .step-label { font-size: 10px; }
   }
 </style>
 </head>
@@ -97,6 +135,35 @@
     </div>
   </div>
 
+  <!-- Action bar (Week2) -->
+  <div class="action-bar">
+    <button class="btn btn-primary" id="btnCollect" onclick="collectOnce()">📡 采集一次最新数据</button>
+    <button class="btn btn-success" id="btnPause" onclick="toggleReporting()">⏸ 暂停周期上报</button>
+  </div>
+
+  <!-- Command status (Week2) -->
+  <div class="cmd-status" id="cmdStatus">
+    <h3 id="cmdTitle">远程采集状态</h3>
+    <div class="cmd-timeline" id="cmdTimeline">
+      <div class="cmd-step active" id="stepSubmitted">
+        <div class="step-dot"></div>
+        <span class="step-label">已提交</span>
+      </div>
+      <div class="cmd-connector" id="conn1"></div>
+      <div class="cmd-step" id="stepReceived">
+        <div class="step-dot"></div>
+        <span class="step-label">设备确认</span>
+      </div>
+      <div class="cmd-connector" id="conn2"></div>
+      <div class="cmd-step" id="stepCompleted">
+        <div class="step-dot"></div>
+        <span class="step-label">采集完成</span>
+      </div>
+    </div>
+    <div class="cmd-timer" id="cmdTimer"></div>
+    <div class="cmd-error" id="cmdError"></div>
+  </div>
+
   <!-- Data table -->
   <div class="table-section">
     <div class="table-header">
@@ -121,6 +188,18 @@ const TABLE = document.getElementById('tableBody');
 const STATUS_DOT = document.getElementById('statusDot');
 const STATUS_TEXT = document.getElementById('statusText');
 const LAST_UPDATE = document.getElementById('lastUpdate');
+const BTN_COLLECT = document.getElementById('btnCollect');
+const BTN_PAUSE = document.getElementById('btnPause');
+const CMD_STATUS = document.getElementById('cmdStatus');
+const CMD_TIMER = document.getElementById('cmdTimer');
+const CMD_ERROR = document.getElementById('cmdError');
+
+let s_reporting_paused = false;
+let s_cmdRequestId = null;
+let s_cmdPollTimer = null;
+let s_cmdStartTime = null;
+
+/* ---------- helpers ---------- */
 
 function fmtTime(isoStr) {
   if (!isoStr) return '--';
@@ -133,6 +212,206 @@ function fmtTs(sec) {
   const d = new Date(sec * 1000);
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
+
+function updateStep(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'cmd-step';
+  if (state) el.classList.add(state);
+}
+
+function updateConnector(id, done) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'cmd-connector' + (done ? ' done' : '');
+}
+
+function showCmdStatus(visible) {
+  CMD_STATUS.classList.toggle('visible', visible);
+}
+
+/* ---------- 采集一次 ---------- */
+
+async function collectOnce() {
+  const device = document.getElementById('deviceSelect').value;
+  if (!device) {
+    CMD_ERROR.textContent = '请先选择一个设备';
+    showCmdStatus(true);
+    return;
+  }
+
+  BTN_COLLECT.disabled = true;
+  BTN_COLLECT.textContent = '⏳ 采集中...';
+  CMD_ERROR.textContent = '';
+
+  // Reset timeline
+  updateStep('stepSubmitted', 'active');
+  updateStep('stepReceived', '');
+  updateStep('stepCompleted', '');
+  updateConnector('conn1', false);
+  updateConnector('conn2', false);
+  showCmdStatus(true);
+  document.getElementById('cmdTitle').textContent = '远程采集状态';
+
+  s_cmdStartTime = Date.now();
+
+  try {
+    // 1. POST /api/commands 创建命令
+    const resp = await fetch('/api/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: device,
+        command_type: 'collect_once',
+        timeout_sec: 30,
+      }),
+    });
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.message || 'create command failed');
+
+    s_cmdRequestId = body.data.request_id;
+    CMD_TIMER.textContent = '⏱ 等待设备响应...';
+    CMD_ERROR.textContent = '';
+
+    // 2. Start polling command status
+    pollCommandStatus(s_cmdRequestId);
+
+  } catch (err) {
+    CMD_ERROR.textContent = '❌ ' + err.message;
+    updateStep('stepSubmitted', 'fail');
+    BTN_COLLECT.disabled = false;
+    BTN_COLLECT.textContent = '📡 采集一次最新数据';
+  }
+}
+
+async function pollCommandStatus(requestId) {
+  if (s_cmdPollTimer) {
+    clearTimeout(s_cmdPollTimer);
+    s_cmdPollTimer = null;
+  }
+
+  try {
+    const resp = await fetch('/api/commands/' + requestId);
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.message);
+
+    const cmd = body.data;
+    const elapsed = ((Date.now() - s_cmdStartTime) / 1000).toFixed(1);
+
+    // Update timeline based on status
+    switch (cmd.status) {
+      case 'pending':
+        updateStep('stepSubmitted', 'active');
+        updateStep('stepReceived', '');
+        updateStep('stepCompleted', '');
+        updateConnector('conn1', false);
+        updateConnector('conn2', false);
+        CMD_TIMER.textContent = '⏱ 已提交，等待设备连接... (' + elapsed + 's)';
+        break;
+
+      case 'received':
+        updateStep('stepSubmitted', 'done');
+        updateStep('stepReceived', 'active');
+        updateStep('stepCompleted', '');
+        updateConnector('conn1', true);
+        updateConnector('conn2', false);
+        CMD_TIMER.textContent = '⏱ 设备已接收，正在采集... (' + elapsed + 's)';
+        break;
+
+      case 'completed':
+        updateStep('stepSubmitted', 'done');
+        updateStep('stepReceived', 'done');
+        updateStep('stepCompleted', 'done');
+        updateConnector('conn1', true);
+        updateConnector('conn2', true);
+        CMD_TIMER.textContent = '✅ 采集完成 (' + elapsed + 's)';
+        document.getElementById('cmdTitle').textContent = '✅ 远程采集完成';
+        BTN_COLLECT.disabled = false;
+        BTN_COLLECT.textContent = '📡 采集一次最新数据';
+        // Refresh data
+        fetchData();
+        return;  // Stop polling
+
+      case 'timeout':
+        updateStep('stepSubmitted', 'done');
+        updateStep('stepReceived', 'fail');
+        updateStep('stepCompleted', '');
+        updateConnector('conn1', true);
+        updateConnector('conn2', false);
+        CMD_TIMER.textContent = '⏱ 超时 (' + elapsed + 's)';
+        CMD_ERROR.textContent = '❌ 设备未在规定时间内响应';
+        document.getElementById('cmdTitle').textContent = '❌ 采集超时';
+        BTN_COLLECT.disabled = false;
+        BTN_COLLECT.textContent = '📡 采集一次最新数据';
+        return;
+
+      default:
+        CMD_TIMER.textContent = '⏱ 状态: ' + cmd.status + ' (' + elapsed + 's)';
+    }
+
+    // Continue polling if not terminal
+    if (elapsed < 35) {
+      s_cmdPollTimer = setTimeout(() => pollCommandStatus(requestId), 1000);
+    } else {
+      CMD_TIMER.textContent = '⏱ 超时 (已超过35s)';
+      CMD_ERROR.textContent = '❌ 设备未响应';
+      updateStep('stepSubmitted', 'done');
+      updateStep('stepReceived', 'fail');
+      updateConnector('conn1', true);
+      document.getElementById('cmdTitle').textContent = '❌ 采集超时';
+      BTN_COLLECT.disabled = false;
+      BTN_COLLECT.textContent = '📡 采集一次最新数据';
+    }
+
+  } catch (err) {
+    CMD_ERROR.textContent = '❌ ' + err.message;
+    s_cmdPollTimer = setTimeout(() => pollCommandStatus(s_cmdRequestId), 2000);
+  }
+}
+
+/* ---------- 暂停/恢复周期上报 ---------- */
+
+async function toggleReporting() {
+  const device = document.getElementById('deviceSelect').value;
+  if (!device) {
+    CMD_ERROR.textContent = '请先选择一个设备';
+    showCmdStatus(true);
+    return;
+  }
+
+  s_reporting_paused = !s_reporting_paused;
+  const enable = !s_reporting_paused;
+
+  BTN_PAUSE.disabled = true;
+
+  try {
+    const resp = await fetch('/api/commands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: device,
+        command_type: 'set_reporting',
+        params: JSON.stringify({ enabled: enable }),
+        timeout_sec: 10,
+      }),
+    });
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.message);
+
+    BTN_PAUSE.textContent = enable ? '⏸ 暂停周期上报' : '▶ 恢复周期上报';
+    BTN_PAUSE.className = 'btn ' + (enable ? 'btn-warning' : 'btn-success');
+
+  } catch (err) {
+    // Revert state on failure
+    s_reporting_paused = !s_reporting_paused;
+    CMD_ERROR.textContent = '❌ ' + err.message;
+    showCmdStatus(true);
+  }
+
+  BTN_PAUSE.disabled = false;
+}
+
+/* ---------- 数据获取 ---------- */
 
 async function fetchData() {
   try {
@@ -182,17 +461,24 @@ async function fetchData() {
       return;
     }
 
-    let html = '<table><thead><tr><th>时间</th><th>设备</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>状态</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>时间</th><th>设备</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>状态</th><th>RequestID</th></tr></thead><tbody>';
     const maxRows = 50;
     for (let i = 0; i < Math.min(records.length, maxRows); i++) {
       const rec = records[i];
+
+      // 通过 request_id 判断是否为远程采集触发
+      let statusBadge = rec.request_id
+        ? '<span class="badge badge-collect">采集</span>'
+        : '<span class="badge badge-ok">周期</span>';
+
       html += '<tr>' +
         '<td>' + fmtTs(rec.ts_device) + '</td>' +
-        '<td>' + (rec.device_id || '') + '</td>' +
+        '<td style="font-family:inherit;font-size:12px;">' + (rec.device_id || '') + '</td>' +
         '<td>' + rec.ax.toFixed(4) + '</td>' +
         '<td>' + rec.ay.toFixed(4) + '</td>' +
         '<td>' + rec.az.toFixed(4) + '</td>' +
-        '<td>' + (rec.status || 'ok') + '</td>' +
+        '<td>' + statusBadge + '</td>' +
+        '<td style="font-size:11px;color:#999;max-width:100px;overflow:hidden;text-overflow:ellipsis;">' + (rec.request_id || '--') + '</td>' +
         '</tr>';
     }
     html += '</tbody></table>';

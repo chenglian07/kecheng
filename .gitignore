@@ -1,12 +1,24 @@
 # ESP-IDF build output
 build/
+build*/
 sdkconfig
 sdkconfig.old
 
 # Secrets (user-specific credentials)
 firmware/main/secrets.h
 
+# Python
+server/__pycache__/
+server/sensor_data.db
+*.pyc
+
+# Build artifacts
+firmware/build_output*
+firmware/rebuild.cmd
+firmware/.clangd
+
 # IDE / OS
+.vscode/
 .vscode/settings.json
 *.swp
 *.swo

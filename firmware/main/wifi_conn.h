@@ -1,6 +1,7 @@
 #ifndef WIFI_CONN_H
 #define WIFI_CONN_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 

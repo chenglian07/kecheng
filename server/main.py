@@ -173,3 +173,13 @@ def index():
         with open(index_path, encoding="utf-8") as f:
             return f.read()
     return HTMLResponse("<h1>KECHENG Sensor Dashboard</h1><p>index.html not found</p>")
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    """实时波形示波器页面"""
+    dashboard_path = os.path.join(static_dir, "dashboard.html")
+    if os.path.isfile(dashboard_path):
+        with open(dashboard_path, encoding="utf-8") as f:
+            return f.read()
+    return HTMLResponse("<h1>Dashboard</h1><p>dashboard.html not found</p>")

@@ -130,13 +130,13 @@ void app_main(void)
     }
 
     /* ---- 5. 循环读取加速度 + 串口输出 + HTTP 上传 ---- */
-    ESP_LOGI(TAG, "--- start periodic reading (1s interval) ---");
+    ESP_LOGI(TAG, "--- start periodic reading (100ms interval, ~10Hz) ---");
     vTaskDelay(pdMS_TO_TICKS(100));
 
     while (1) {
         /* Week2: 如果周期上报被暂停，跳过本次上报但继续等待 */
         if (cmd_is_reporting_paused()) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
@@ -155,6 +155,6 @@ void app_main(void)
             ESP_LOGE(TAG, "read error: %s", esp_err_to_name(ret));
         }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

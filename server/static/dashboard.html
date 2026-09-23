@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KECHENG 传感器示波器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+    background: #1a1d23;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    background: #22252b;
+    border-bottom: 1px solid #2d3139;
+  }
+  .topbar .logo {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f0a500;
+    margin-right: 12px;
+  }
+  .topbar .logo span { color: #4fc3f7; }
+  .topbar .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #2d3139;
+    color: #999;
+    margin-right: 16px;
+  }
+  .topbar .node-select {
+    background: #2d3139;
+    border: 1px solid #3d4249;
+    color: #e0e0e0;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-right: auto;
+  }
+  .topbar .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    margin-right: 16px;
+  }
+  .topbar .status-badge .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+  .topbar .btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid #3d4249;
+    background: #2d3139;
+    color: #ccc;
+    font-size: 13px;
+    cursor: pointer;
+    margin-left: 8px;
+  }
+  .topbar .btn:hover { background: #3d4249; }
+
+  /* Main content */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+    padding: 16px 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  /* Panel */
+  .panel {
+    background: #22252b;
+    border-radius: 10px;
+    border: 1px solid #2d3139;
+    overflow: hidden;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #2d3139;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .panel-header .icon { margin-right: 8px; }
+  .panel-header .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: #888;
+    font-weight: 400;
+  }
+  .panel-body { padding: 16px; }
+
+  /* Waveform */
+  .waveform-panel { grid-column: 1; }
+  .waveform-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #2d3139;
+  }
+  .waveform-controls .btn-pause {
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid #3d4249;
+    background: #2d3139;
+    color: #ccc;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .waveform-controls .btn-pause:hover { background: #3d4249; }
+  .waveform-controls .zoom-select {
+    background: #2d3139;
+    border: 1px solid #3d4249;
+    color: #ccc;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .waveform-legend {
+    display: flex;
+    gap: 16px;
+    padding: 8px 16px;
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+  .waveform-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .waveform-legend .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .legend-ax { color: #ef5350; }
+  .legend-ay { color: #66bb6a; }
+  .legend-az { color: #42a5f5; }
+  .legend-ax .legend-dot { background: #ef5350; }
+  .legend-ay .legend-dot { background: #66bb6a; }
+  .legend-az .legend-dot { background: #42a5f5; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes flash {
+    0% { background: rgba(34, 197, 94, 0.3); }
+    100% { background: transparent; }
+  }
+  .live-dot {
+    animation: pulse 1s ease-in-out infinite;
+  }
+  .flash-update {
+    animation: flash 0.3s ease-out;
+  }
+
+  .waveform-values {
+    display: flex;
+    gap: 16px;
+    padding: 4px 16px 8px;
+    font-size: 12px;
+    font-family: "SF Mono", Monaco, "Consolas", monospace;
+  }
+  .waveform-values .val-ax { color: #ef5350; }
+  .waveform-values .val-ay { color: #66bb6a; }
+  .waveform-values .val-az { color: #42a5f5; }
+
+  #waveformCanvas {
+    width: 100%;
+    height: 280px;
+    display: block;
+  }
+
+  /* 3D attitude */
+  .attitude-panel { grid-column: 2; grid-row: 1; }
+  #attitudeCanvas {
+    width: 100%;
+    height: 200px;
+    display: block;
+  }
+  .attitude-values {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .attitude-values .att-item {
+    text-align: center;
+    padding: 8px;
+    background: #2d3139;
+    border-radius: 6px;
+  }
+  .attitude-values .att-label {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 4px;
+  }
+  .attitude-values .att-value {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: "SF Mono", Monaco, monospace;
+  }
+  .att-pitch .att-value { color: #ef5350; }
+  .att-roll .att-value { color: #66bb6a; }
+  .att-yaw .att-value { color: #42a5f5; }
+
+  .attitude-feature {
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #2d3139;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #aaa;
+  }
+
+  /* Bottom panels */
+  .bottom-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  /* WiFi panel */
+  .wifi-panel .wifi-list {
+    font-size: 13px;
+  }
+  .wifi-panel .wifi-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #2d3139;
+  }
+  .wifi-panel .wifi-item:last-child { border-bottom: none; }
+  .wifi-panel .wifi-ssid { color: #e0e0e0; }
+  .wifi-panel .wifi-rssi { color: #888; font-family: monospace; }
+
+  /* Sensor info */
+  .sensor-panel .sensor-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    font-size: 13px;
+  }
+  .sensor-panel .sensor-item {
+    padding: 10px;
+    background: #2d3139;
+    border-radius: 6px;
+  }
+  .sensor-panel .sensor-label {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 4px;
+  }
+  .sensor-panel .sensor-value {
+    font-size: 16px;
+    font-weight: 600;
+    font-family: monospace;
+  }
+
+  /* Status bar */
+  .status-bar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: #22252b;
+    border-radius: 10px;
+    border: 1px solid #2d3139;
+    font-size: 12px;
+    color: #888;
+  }
+  .status-bar .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+  }
+  .status-bar .dot.offline { background: #ef5350; }
+
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+    .attitude-panel { grid-column: 1; }
+    .bottom-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="logo"> KECHENG <span>DevBench</span></div>
+  <div class="tag">Dev/QA Console</div>
+  <select class="node-select" id="deviceSelect">
+    <option value="g02-s20251040108-esp32s3eye">g02-s20251040108-esp32s3eye</option>
+  </select>
+  <div class="status-badge">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">在线</span>
+  </div>
+  <button class="btn" onclick="location.reload()"> 刷新</button>
+  <button class="btn" id="btnAuto" onclick="toggleAuto()">自动 0.5s</button>
+</div>
+
+<!-- Main content -->
+<div class="main">
+
+  <!-- Waveform panel -->
+  <div class="panel waveform-panel">
+    <div class="panel-header">
+      <span class="icon"></span> 三轴波形示波器 (Acc)
+      <span class="meta"><span class="live-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:4px;"></span><span id="waveformMeta">实时推流 · 缓冲: 60 点</span></span>
+    </div>
+    <div class="waveform-controls">
+      <button class="btn-pause" id="btnPause" onclick="togglePause()">⏸ 暂停</button>
+      <select class="zoom-select" id="zoomSelect" onchange="changeZoom()">
+        <option value="1">缩放 1.0×</option>
+        <option value="2">缩放 2.0×</option>
+        <option value="0.5">缩放 0.5×</option>
+      </select>
+    </div>
+    <div class="waveform-legend">
+      <div class="legend-item legend-ax"><span class="legend-dot"></span> Acc X</div>
+      <div class="legend-item legend-ay"><span class="legend-dot"></span> Acc Y</div>
+      <div class="legend-item legend-az"><span class="legend-dot"></span> Acc Z</div>
+    </div>
+    <div class="waveform-values">
+      <span class="val-ax" id="valAX">AX: --</span>
+      <span class="val-ay" id="valAY">AY: --</span>
+      <span class="val-az" id="valAZ">AZ: --</span>
+    </div>
+    <canvas id="waveformCanvas"></canvas>
+  </div>
+
+  <!-- 3D Attitude panel -->
+  <div class="panel attitude-panel">
+    <div class="panel-header">
+      <span class="icon"></span> 3D 设备空间姿态
+      <span class="meta" id="attitudeState">自由倾斜 (Tilted)</span>
+    </div>
+    <div class="panel-body">
+      <canvas id="attitudeCanvas"></canvas>
+      <div class="attitude-values">
+        <div class="att-item att-pitch">
+          <div class="att-label">俯仰 Pitch</div>
+          <div class="att-value" id="valPitch">--°</div>
+        </div>
+        <div class="att-item att-roll">
+          <div class="att-label">横滚 Roll</div>
+          <div class="att-value" id="valRoll">--°</div>
+        </div>
+        <div class="att-item att-yaw">
+          <div class="att-label">航向 Yaw</div>
+          <div class="att-value" id="valYaw">--°</div>
+        </div>
+      </div>
+      <div class="attitude-feature" id="attFeature">
+        特征: 自由倾斜 (Tilted) · 1.00G
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom row -->
+  <div class="bottom-row">
+    <!-- WiFi panel -->
+    <div class="panel wifi-panel">
+      <div class="panel-header">
+        <span class="icon">📶</span> Wi-Fi 连接状态
+        <span class="meta" id="wifiMeta">1 个 AP</span>
+      </div>
+      <div class="panel-body wifi-list" id="wifiList">
+        <div class="wifi-item">
+          <span class="wifi-ssid">431</span>
+          <span class="wifi-rssi" id="wifiRssi">-- dBm</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sensor info panel -->
+    <div class="panel sensor-panel">
+      <div class="panel-header">
+        <span class="icon">🔧</span> 传感器信息
+      </div>
+      <div class="panel-body">
+        <div class="sensor-info">
+          <div class="sensor-item">
+            <div class="sensor-label">传感器型号</div>
+            <div class="sensor-value">QMA7981</div>
+          </div>
+          <div class="sensor-item">
+            <div class="sensor-label">接口类型</div>
+            <div class="sensor-value">I2C (3轴)</div>
+          </div>
+          <div class="sensor-item">
+            <div class="sensor-label">I2C 地址</div>
+            <div class="sensor-value">0x12</div>
+          </div>
+          <div class="sensor-item">
+            <div class="sensor-label">采样率</div>
+            <div class="sensor-value">~10 Hz</div>
+          </div>
+          <div class="sensor-item">
+            <div class="sensor-label">设备 IP</div>
+            <div class="sensor-value" id="deviceIP">10.1.41.156</div>
+          </div>
+          <div class="sensor-item">
+            <div class="sensor-label">数据总量</div>
+            <div class="sensor-value" id="dataCount">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span class="dot" id="statusDot2"></span>
+    <span id="statusText2">等待数据...</span>
+    <span style="margin-left:auto" id="lastUpdate">--</span>
+  </div>
+
+</div>
+
+<script>
+// ========== Configuration ==========
+const BUFFER_SIZE = 60;
+const POLL_INTERVAL = 100; // ms - match firmware 10Hz rate
+
+// ========== State ==========
+let bufferAX = [];
+let bufferAY = [];
+let bufferAZ = [];
+let bufferTime = [];
+let isPaused = false;
+let autoRefresh = true;
+let zoomLevel = 1;
+let lastData = null;
+let lastId = 0; // dedup by database row id
+let frameCount = 0;
+
+// ========== Canvas setup ==========
+const wfCanvas = document.getElementById('waveformCanvas');
+const wfCtx = wfCanvas.getContext('2d');
+const attCanvas = document.getElementById('attitudeCanvas');
+const attCtx = attCanvas.getContext('2d');
+
+function resizeCanvases() {
+  const wfRect = wfCanvas.parentElement.getBoundingClientRect();
+  wfCanvas.width = wfRect.width - 32;
+  wfCanvas.height = 280;
+
+  const attRect = attCanvas.parentElement.getBoundingClientRect();
+  attCanvas.width = attRect.width - 32;
+  attCanvas.height = 200;
+}
+resizeCanvases();
+window.addEventListener('resize', resizeCanvases);
+
+// ========== Data fetching ==========
+async function fetchData() {
+  if (isPaused) return;
+
+  const device = document.getElementById('deviceSelect').value;
+  try {
+    const url = '/api/data' + (device ? '?device_id=' + encodeURIComponent(device) + '&limit=5' : '');
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const body = await resp.json();
+
+    if (body.code !== 0) throw new Error(body.message);
+    const records = body.data || [];
+
+    if (records.length > 0) {
+      const r = records[0];
+      lastData = r;
+
+      // Only add to buffer if this is new data (by database id)
+      if (r.id !== lastId) {
+        lastId = r.id;
+        frameCount++;
+
+        bufferAX.push(r.ax);
+        bufferAY.push(r.ay);
+        bufferAZ.push(r.az);
+        bufferTime.push(Date.now());
+
+        if (bufferAX.length > BUFFER_SIZE) {
+          bufferAX.shift();
+          bufferAY.shift();
+          bufferAZ.shift();
+          bufferTime.shift();
+        }
+
+        // Flash effect on new data
+        const valContainer = document.querySelector('.waveform-values');
+        valContainer.classList.remove('flash-update');
+        void valContainer.offsetWidth;
+        valContainer.classList.add('flash-update');
+      }
+
+      // Always update UI
+      updateStatus(r);
+      updateValues(r);
+      updateAttitude(r);
+      drawWaveform();
+      drawAttitude();
+    }
+  } catch (err) {
+    console.error('fetch error:', err);
+    document.getElementById('statusDot').className = 'dot offline';
+    document.getElementById('statusDot2').className = 'dot offline';
+    document.getElementById('statusText2').textContent = '连接失败: ' + err.message;
+  }
+}
+
+function updateStatus(r) {
+  document.getElementById('statusDot').className = 'dot';
+  document.getElementById('statusDot2').className = 'dot';
+  document.getElementById('statusText').textContent = '在线 (WiFi)';
+  document.getElementById('statusText2').textContent = '设备 ' + r.device_id + ' · 实时推流';
+
+  const d = new Date(r.ts_server);
+  document.getElementById('lastUpdate').textContent = '最后更新: ' + d.toLocaleTimeString('zh-CN');
+  document.getElementById('dataCount').textContent = bufferTime.length + ' 条';
+  document.getElementById('waveformMeta').textContent = '实时推流 · 缓冲: ' + bufferAX.length + '/' + BUFFER_SIZE + ' 点';
+}
+
+function updateValues(r) {
+  document.getElementById('valAX').textContent = 'AX: ' + r.ax.toFixed(4);
+  document.getElementById('valAY').textContent = 'AY: ' + r.ay.toFixed(4);
+  document.getElementById('valAZ').textContent = 'AZ: ' + r.az.toFixed(4);
+}
+
+// ========== Attitude calculation ==========
+function calcAttitude(ax, ay, az) {
+  const pitch = Math.atan2(ay, Math.sqrt(ax * ax + az * az)) * 180 / Math.PI;
+  const roll = Math.atan2(-ax, az) * 180 / Math.PI;
+  const yaw = Math.atan2(ax, ay) * 180 / Math.PI;
+  const g = Math.sqrt(ax * ax + ay * ay + az * az);
+
+  let state = '水平 (Level)';
+  if (Math.abs(pitch) > 30 || Math.abs(roll) > 30) state = '倾斜 (Tilted)';
+  if (g > 1.5) state = '运动 (Moving)';
+  if (g < 0.5) state = '失重 (Free fall)';
+
+  return { pitch, roll, yaw, g, state };
+}
+
+function updateAttitude(r) {
+  const att = calcAttitude(r.ax, r.ay, r.az);
+
+  document.getElementById('valPitch').textContent = att.pitch.toFixed(1) + '°';
+  document.getElementById('valRoll').textContent = att.roll.toFixed(1) + '°';
+  document.getElementById('valYaw').textContent = att.yaw.toFixed(1) + '°';
+  document.getElementById('attitudeState').textContent = att.state;
+  document.getElementById('attFeature').textContent =
+    '特征: ' + att.state + ' · ' + att.g.toFixed(2) + 'G';
+}
+
+// ========== Waveform drawing ==========
+function drawWaveform() {
+  const w = wfCanvas.width;
+  const h = wfCanvas.height;
+  const ctx = wfCtx;
+
+  // Clear
+  ctx.fillStyle = '#1a1d23';
+  ctx.fillRect(0, 0, w, h);
+
+  // Auto-scale
+  let maxVal = 1.0;
+  if (bufferAX.length > 0) {
+    const allVals = [...bufferAX, ...bufferAY, ...bufferAZ];
+    maxVal = Math.max(...allVals.map(Math.abs), 1.0);
+  }
+  const range = Math.ceil(maxVal * 1.5 * zoomLevel * 2) / 2;
+  const scaleY = (h / 2) / range;
+  const zeroY = h / 2;
+
+  // Grid
+  ctx.strokeStyle = '#2d3139';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#555';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'left';
+  const gridLines = 4;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = (h / gridLines) * i;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+    const gVal = range - (range * 2 / gridLines) * i;
+    ctx.fillText(gVal.toFixed(1) + 'g', 4, y - 3);
+  }
+  for (let i = 0; i <= 8; i++) {
+    const x = (w / 8) * i;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+
+  // Zero line
+  ctx.strokeStyle = '#3d4249';
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(0, zeroY);
+  ctx.lineTo(w, zeroY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw lines
+  function drawLine(buffer, color) {
+    if (buffer.length < 2) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < buffer.length; i++) {
+      const x = (i / (BUFFER_SIZE - 1)) * w;
+      const y = zeroY - buffer[i] * scaleY;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  drawLine(bufferAX, '#ef5350');
+  drawLine(bufferAY, '#66bb6a');
+  drawLine(bufferAZ, '#42a5f5');
+
+  // Meta info
+  ctx.fillStyle = '#666';
+  ctx.font = '11px monospace';
+  const fps = frameCount / (bufferTime.length > 0 ? (Date.now() - bufferTime[0]) / 1000 : 1);
+  ctx.fillText('范围: ±' + range.toFixed(1) + 'g · 缓冲: ' + bufferAX.length + '点 · ' + fps.toFixed(1) + 'Hz · 帧 #' + frameCount, 50, 16);
+
+  // LIVE indicator
+  ctx.fillStyle = '#22c55e';
+  ctx.beginPath();
+  ctx.arc(16, 12, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#22c55e';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText('LIVE', 24, 16);
+}
+
+// ========== 3D Attitude drawing ==========
+function drawAttitude() {
+  const w = attCanvas.width;
+  const h = attCanvas.height;
+  const ctx = attCtx;
+
+  ctx.fillStyle = '#1a1d23';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!lastData) {
+    ctx.fillStyle = '#666';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('等待数据...', w / 2, h / 2);
+    return;
+  }
+
+  const att = calcAttitude(lastData.ax, lastData.ay, lastData.az);
+
+  const cx = w / 2;
+  const cy = h / 2;
+  const size = 50;
+
+  const pitchRad = att.pitch * Math.PI / 180;
+  const rollRad = att.roll * Math.PI / 180;
+
+  const cosP = Math.cos(pitchRad);
+  const sinP = Math.sin(pitchRad);
+  const cosR = Math.cos(rollRad);
+  const sinR = Math.sin(rollRad);
+
+  const corners = [
+    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+    [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
+  ];
+
+  const projected = corners.map(([x, y, z]) => {
+    let y1 = y * cosP - z * sinP;
+    let z1 = y * sinP + z * cosP;
+    let x1 = x * cosR + z1 * sinR;
+    let z2 = -x * sinR + z1 * cosR;
+
+    const scale = 0.8;
+    return {
+      x: cx + x1 * size * scale,
+      y: cy + y1 * size * scale,
+      z: z2
+    };
+  });
+
+  const faces = [
+    { indices: [0, 1, 2, 3], color: 'rgba(66, 165, 245, 0.3)' },
+    { indices: [4, 5, 6, 7], color: 'rgba(66, 165, 245, 0.2)' },
+    { indices: [0, 1, 5, 4], color: 'rgba(102, 187, 106, 0.2)' },
+    { indices: [2, 3, 7, 6], color: 'rgba(102, 187, 106, 0.3)' },
+    { indices: [0, 3, 7, 4], color: 'rgba(239, 83, 80, 0.2)' },
+    { indices: [1, 2, 6, 5], color: 'rgba(239, 83, 80, 0.3)' }
+  ];
+
+  faces.forEach(face => {
+    ctx.fillStyle = face.color;
+    ctx.beginPath();
+    face.indices.forEach((idx, i) => {
+      const p = projected[idx];
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+  });
+
+  ctx.strokeStyle = '#4fc3f7';
+  ctx.lineWidth = 1.5;
+  const edges = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7]
+  ];
+  edges.forEach(([a, b]) => {
+    ctx.beginPath();
+    ctx.moveTo(projected[a].x, projected[a].y);
+    ctx.lineTo(projected[b].x, projected[b].y);
+    ctx.stroke();
+  });
+
+  const axisLen = 30;
+  const axes = [
+    { dir: [1, 0, 0], color: '#ef5350', label: '+X' },
+    { dir: [0, 1, 0], color: '#66bb6a', label: '+Y' },
+    { dir: [0, 0, 1], color: '#42a5f5', label: '+Z' }
+  ];
+
+  axes.forEach(axis => {
+    let [x, y, z] = axis.dir;
+    let y1 = y * cosP - z * sinP;
+    let z1 = y * sinP + z * cosP;
+    let x1 = x * cosR + z1 * sinR;
+
+    ctx.strokeStyle = axis.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + x1 * axisLen, cy + y1 * axisLen);
+    ctx.stroke();
+
+    ctx.fillStyle = axis.color;
+    ctx.font = '10px sans-serif';
+    ctx.fillText(axis.label, cx + x1 * (axisLen + 8), cy + y1 * (axisLen + 8));
+  });
+}
+
+// ========== Controls ==========
+function togglePause() {
+  isPaused = !isPaused;
+  document.getElementById('btnPause').textContent = isPaused ? '▶ 继续' : ' 暂停';
+}
+
+function toggleAuto() {
+  autoRefresh = !autoRefresh;
+  document.getElementById('btnAuto').textContent = autoRefresh ? '自动 0.1s' : '手动';
+}
+
+function changeZoom() {
+  zoomLevel = parseFloat(document.getElementById('zoomSelect').value);
+}
+
+// ========== Main loop ==========
+fetchData();
+setInterval(fetchData, POLL_INTERVAL);
+</script>
+
+</body>
+</html>

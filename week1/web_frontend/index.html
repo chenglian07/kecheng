@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week1 - ESP32-S3-EYE IMU 数据监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background: #0f1923; color: #e0e0e0; min-height: 100vh; }
+        .header { background: linear-gradient(135deg,#1a2a3a,#2a4a6a); padding: 20px 30px; display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #3498db; }
+        .header h1 { font-size: 22px; color: #fff; }
+        .header h1 span { color: #3498db; font-size: 14px; margin-left: 10px; font-weight: normal; }
+        .status-bar { display: flex; align-items: center; gap: 15px; font-size: 13px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .status-dot.online { background: #2ecc71; box-shadow: 0 0 6px #2ecc71; }
+        .status-dot.offline { background: #e74c3c; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        .device-selector { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .device-selector label { font-size: 14px; color: #aaa; }
+        .device-selector select { background: #1a2a3a; color: #fff; border: 1px solid #3498db; padding: 6px 12px; border-radius: 4px; font-size: 14px; }
+        .device-selector button { background: #3498db; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+        .device-selector button:hover { background: #2980b9; }
+        .latest-card { background: linear-gradient(135deg,#1a2a3a,#1e3450); border: 1px solid #2a4a6a; border-radius: 12px; padding: 25px; margin-bottom: 20px; }
+        .latest-card h2 { font-size: 16px; color: #3498db; margin-bottom: 15px; }
+        .latest-info { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 15px; }
+        .info-item { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; text-align: center; }
+        .info-item .label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+        .info-item .value { font-size: 24px; font-weight: bold; color: #fff; font-family: 'Consolas',monospace; }
+        .info-item .unit { font-size: 12px; color: #666; margin-left: 3px; }
+        .info-item.axis-x .value { color: #e74c3c; }
+        .info-item.axis-y .value { color: #2ecc71; }
+        .info-item.axis-z .value { color: #3498db; }
+        .stale-warning { background: rgba(243,156,18,0.15); border: 1px solid #f39c12; border-radius: 8px; padding: 12px 18px; margin-top: 15px; font-size: 14px; color: #f39c12; display: none; }
+        .stale-warning.show { display: flex; align-items: center; gap: 8px; }
+        .no-data-msg { text-align: center; padding: 40px; color: #666; font-size: 16px; }
+        .no-data-msg .icon { font-size: 48px; margin-bottom: 10px; }
+        .history-card { background: #1a2a3a; border: 1px solid #2a4a6a; border-radius: 12px; padding: 20px; overflow-x: auto; }
+        .history-card h2 { font-size: 16px; color: #3498db; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: #0f1923; color: #888; padding: 10px 12px; text-align: left; font-weight: 600; text-transform: uppercase; font-size: 11px; border-bottom: 1px solid #2a4a6a; }
+        td { padding: 10px 12px; border-bottom: 1px solid rgba(42,74,106,0.3); font-family: 'Consolas',monospace; font-size: 13px; }
+        tr:hover td { background: rgba(52,152,219,0.05); }
+        td.device-tag { color: #3498db; font-weight: bold; }
+        .error-banner { background: rgba(231,76,60,0.15); border: 1px solid #e74c3c; border-radius: 8px; padding: 12px 18px; margin-bottom: 20px; color: #e74c3c; font-size: 14px; display: none; }
+        .error-banner.show { display: block; }
+        .refresh-control { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+        .refresh-control label { font-size: 13px; color: #aaa; }
+        .footer { text-align: center; padding: 20px; color: #444; font-size: 12px; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .loading { animation: pulse 1.5s infinite; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>📡 IMU 数据监控面板 <span>ESP32-S3-EYE × QMA7981 | Week 1</span></h1>
+    <div class="status-bar">
+        <span id="connStatus"><span class="status-dot offline"></span> 未连接</span>
+        <span id="lastRefresh" style="color:#666">--</span>
+    </div>
+</div>
+<div class="container">
+    <div class="error-banner" id="errorBanner"><strong>⚠️ 连接错误：</strong><span id="errorText"></span></div>
+    <div class="device-selector">
+        <label>🔧 设备筛选：</label>
+        <select id="deviceSelect"><option value="">全部设备</option></select>
+        <button onclick="refreshData()">🔄 刷新</button>
+    </div>
+    <div class="refresh-control">
+        <label><input type="checkbox" id="autoRefresh" checked> 自动刷新（3秒）</label>
+    </div>
+    <div class="latest-card" id="latestCard">
+        <h2>📊 最新数据</h2>
+        <div id="latestContent"><div class="no-data-msg loading"><div class="icon">📡</div><div>正在连接后端，请稍候...</div></div></div>
+        <div class="stale-warning" id="staleWarning">⏰ <strong>数据未更新</strong> — 最后数据时间：<span id="staleTime">--</span>，设备可能已停止采集。</div>
+    </div>
+    <div class="history-card">
+        <h2>📋 历史记录（最新 50 条）</h2>
+        <table>
+            <thead><tr><th>#</th><th>设备ID</th><th>时间戳</th><th>AX(mg)</th><th>AY(mg)</th><th>AZ(mg)</th><th>RawX</th><th>RawY</th><th>RawZ</th><th>ChipID</th><th>服务端时间</th></tr></thead>
+            <tbody id="historyBody"><tr><td colspan="11" class="no-data-msg">暂无数据</td></tr></tbody>
+        </table>
+    </div>
+</div>
+<div class="footer">Week 1 课程项目 · ESP32-S3-EYE + QMA7981 + FastAPI</div>
+<script>
+const API_BASE = window.location.origin;
+let autoRefreshTimer = null;
+const STALE_THRESHOLD_SEC = 30;
+let lastDataTimestamp = 0;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadDevices(); refreshData(); startAutoRefresh();
+    document.getElementById('autoRefresh').addEventListener('change', e => {
+        if (e.target.checked) startAutoRefresh(); else stopAutoRefresh();
+    });
+    document.getElementById('deviceSelect').addEventListener('change', () => refreshData());
+});
+
+function startAutoRefresh() { stopAutoRefresh(); autoRefreshTimer = setInterval(() => { refreshData(); loadDevices(); }, 3000); }
+function stopAutoRefresh() { if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; } }
+
+async function loadDevices() {
+    try {
+        const res = await fetch(API_BASE + '/api/devices');
+        if (!res.ok) return;
+        const data = await res.json();
+        const sel = document.getElementById('deviceSelect');
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">全部设备</option>';
+        data.devices.forEach(d => { const o = document.createElement('option'); o.value = d; o.textContent = d; sel.appendChild(o); });
+        sel.value = cur;
+    } catch(e) {}
+}
+
+async function refreshData() {
+    const dev = document.getElementById('deviceSelect').value;
+    let url = API_BASE + '/api/imu?limit=50';
+    if (dev) url += '&device_id=' + encodeURIComponent(dev);
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        updateConnStatus(true); hideError();
+        if (data.records && data.records.length > 0) {
+            renderLatest(data.records[0]);
+            renderHistory(data.records);
+            lastDataTimestamp = data.records[0].timestamp;
+            checkStale();
+        } else { showNoData(); }
+        document.getElementById('lastRefresh').textContent = '刷新: ' + new Date().toLocaleTimeString();
+    } catch(err) {
+        updateConnStatus(false);
+        showError('无法连接后端: ' + err.message + '。请检查后端是否启动。');
+    }
+}
+
+function renderLatest(r) {
+    const ts = new Date(r.timestamp * 1000).toLocaleString('zh-CN');
+    document.getElementById('latestContent').innerHTML =
+        '<div class="latest-info">' +
+        '<div class="info-item"><div class="label">设备 ID</div><div class="value" style="font-size:18px;color:#3498db">' + esc(r.device_id) + '</div></div>' +
+        '<div class="info-item"><div class="label">采集时间</div><div class="value" style="font-size:14px">' + ts + '</div></div>' +
+        '<div class="info-item axis-x"><div class="label">X 轴加速度</div><div class="value">' + r.ax_mg.toFixed(1) + '<span class="unit">mg</span></div></div>' +
+        '<div class="info-item axis-y"><div class="label">Y 轴加速度</div><div class="value">' + r.ay_mg.toFixed(1) + '<span class="unit">mg</span></div></div>' +
+        '<div class="info-item axis-z"><div class="label">Z 轴加速度</div><div class="value">' + r.az_mg.toFixed(1) + '<span class="unit">mg</span></div></div>' +
+        '<div class="info-item"><div class="label">原始值 (X/Y/Z)</div><div class="value" style="font-size:14px">' + r.raw_x + ' / ' + r.raw_y + ' / ' + r.raw_z + '</div></div>' +
+        '<div class="info-item"><div class="label">时间戳</div><div class="value" style="font-size:16px">' + r.timestamp + '</div></div>' +
+        '<div class="info-item"><div class="label">Chip ID</div><div class="value" style="font-size:18px">0x' + r.chip_id.toString(16).toUpperCase() + '</div></div>' +
+        '</div>';
+}
+
+function renderHistory(records) {
+    const tb = document.getElementById('historyBody');
+    tb.innerHTML = '';
+    records.forEach(r => {
+        const ts = new Date(r.timestamp * 1000).toLocaleString('zh-CN');
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+            '<td>' + r.id + '</td>' +
+            '<td class="device-tag">' + esc(r.device_id) + '</td>' +
+            '<td>' + ts + '</td>' +
+            '<td style="color:#e74c3c">' + r.ax_mg.toFixed(1) + '</td>' +
+            '<td style="color:#2ecc71">' + r.ay_mg.toFixed(1) + '</td>' +
+            '<td style="color:#3498db">' + r.az_mg.toFixed(1) + '</td>' +
+            '<td>' + r.raw_x + '</td><td>' + r.raw_y + '</td><td>' + r.raw_z + '</td>' +
+            '<td>0x' + r.chip_id.toString(16).toUpperCase() + '</td>' +
+            '<td style="color:#666;font-size:11px">' + esc(r.created_at || '--') + '</td>';
+        tb.appendChild(tr);
+    });
+}
+
+function checkStale() {
+    const age = Math.floor(Date.now() / 1000) - lastDataTimestamp;
+    const w = document.getElementById('staleWarning');
+    if (age > STALE_THRESHOLD_SEC) {
+        document.getElementById('staleTime').textContent = new Date(lastDataTimestamp * 1000).toLocaleString('zh-CN') + ' (' + age + '秒前)';
+        w.classList.add('show');
+    } else { w.classList.remove('show'); }
+}
+
+function updateConnStatus(on) {
+    document.getElementById('connStatus').innerHTML = on
+        ? '<span class="status-dot online"></span> 后端已连接'
+        : '<span class="status-dot offline"></span> 后端断开';
+}
+function showError(msg) { document.getElementById('errorText').textContent = msg; document.getElementById('errorBanner').classList.add('show'); }
+function hideError() { document.getElementById('errorBanner').classList.remove('show'); }
+function showNoData() {
+    document.getElementById('latestContent').innerHTML = '<div class="no-data-msg"><div class="icon">📭</div><div>暂无 IMU 数据</div><div style="font-size:13px;color:#555;margin-top:5px">请确认 ESP32 已开机并连接 WiFi 上传数据。</div></div>';
+    document.getElementById('historyBody').innerHTML = '<tr><td colspan="11" class="no-data-msg">暂无数据</td></tr>';
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+setInterval(checkStale, 5000);
+</script>
+</body>
+</html>

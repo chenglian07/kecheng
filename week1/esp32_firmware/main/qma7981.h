@@ -13,6 +13,7 @@
 #define QMA7981_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -84,6 +85,12 @@ esp_err_t qma7981_init(qma7981_range_t range);
  * @return ESP_OK 成功
  */
 esp_err_t qma7981_read(qma7981_data_t *data);
+
+/**
+ * @brief  查询传感器是否成功激活（硬件正常）
+ * @return true 传感器正常工作, false 传感器存在硬件故障
+ */
+bool qma7981_is_active(void);
 
 /**
  * @brief  反初始化，释放 I2C 资源

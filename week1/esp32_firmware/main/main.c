@@ -116,6 +116,13 @@ void app_main(void)
         }
     }
 
+    if (!qma7981_is_active()) {
+        ESP_LOGE(TAG, "❌ 传感器未能激活，请检查硬件连接");
+        ESP_LOGW(TAG, "   系统将继续运行并上传零值数据");
+    } else {
+        ESP_LOGI(TAG, "✅ QMA7981 传感器正常工作中");
+    }
+
     /* 测试读取一次 */
     qma7981_data_t test_data;
     ret = qma7981_read(&test_data);

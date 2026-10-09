@@ -1,12 +1,14 @@
 /*
  * qma7981.c - QMA7981 3轴加速度计 I2C 驱动实现
  *
+ * 完全匹配已验证的工作版本驱动(firmware/main/qma7981.c)的初始化逻辑：
+ *   - 只写 PWR 寄存器 (0x11 = 0xC0) 激活传感器
+ *   - 不写 RANGE / BW 寄存器（使用默认 ±2g）
+ *   - 不做软复位
+ *
  * 数据格式：14-bit 有符号整数，分布在 MSB [13:6] 和 LSB [5:0]
  * LSB 低2位为状态位，需掩码 (& 0xFC)
- * 转换公式：accel_mg = raw_14bit * (range_mg / 8192)
- *
- * 注意：初始化时不做软复位(0xB6→0x36)，直接写 PWR 寄存器激活传感器。
- *       软复位会导致低地址寄存器(0x00-0x11)锁定为只读状态。
+ * 转换公式：accel_g = raw_14bit * 2.0 / 8191
  */
 
 #include "qma7981.h"
@@ -17,7 +19,6 @@
 
 static const char *TAG = "QMA7981";
 
-static qma7981_range_t s_range = QMA7981_RANGE_8G;
 static bool s_sensor_active = false;
 static uint8_t s_chip_id = 0;
 
@@ -46,22 +47,9 @@ static esp_err_t i2c_read_block(uint8_t reg_start, uint8_t *buf, size_t len)
                                        buf, len, pdMS_TO_TICKS(100));
 }
 
-/* 根据量程枚举获取满量程 mg 值 */
-static float range_to_mg(qma7981_range_t range)
-{
-    switch (range) {
-        case QMA7981_RANGE_2G:  return 2000.0f;
-        case QMA7981_RANGE_4G:  return 4000.0f;
-        case QMA7981_RANGE_8G:  return 8000.0f;
-        case QMA7981_RANGE_16G: return 16000.0f;
-        case QMA7981_RANGE_32G: return 32000.0f;
-        default:                return 2000.0f;
-    }
-}
-
 esp_err_t qma7981_init(qma7981_range_t range)
 {
-    s_range = range;
+    (void)range;  /* 忽略量程参数，使用默认 2g（与工作版本一致） */
     s_sensor_active = false;
     esp_err_t ret;
 
@@ -95,7 +83,7 @@ esp_err_t qma7981_init(qma7981_range_t range)
         return ret;
     }
 
-    /* 3. 直接激活传感器（不做软复位！软复位会导致寄存器锁定） */
+    /* 3. 设置 Active 模式（唤醒传感器）— 与工作版本完全一致 */
     ret = i2c_write_reg(QMA7981_REG_PWR, 0xC0);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "write PWR failed: %s", esp_err_to_name(ret));
@@ -103,7 +91,7 @@ esp_err_t qma7981_init(qma7981_range_t range)
     }
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    /* 4. 验证 Chip ID */
+    /* 4. 读取 Chip ID */
     ret = i2c_read_reg(QMA7981_REG_CHIP_ID, &s_chip_id);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "读取 Chip ID 失败: %s", esp_err_to_name(ret));
@@ -111,32 +99,30 @@ esp_err_t qma7981_init(qma7981_range_t range)
     }
     ESP_LOGI(TAG, "Chip ID: 0x%02X", s_chip_id);
 
-    if (s_chip_id != 0xB3 && s_chip_id != 0x90) {
-        ESP_LOGW(TAG, "Chip ID 非典型值: 0x%02X (期望 0xB3/0x90)", s_chip_id);
+    /* 5. Dump 关键寄存器用于调试 */
+    uint8_t reg_val;
+    for (uint8_t r = 0x0F; r <= 0x11; r++) {
+        if (i2c_read_reg(r, &reg_val) == ESP_OK) {
+            ESP_LOGI(TAG, "  REG[0x%02X] = 0x%02X", r, reg_val);
+        }
     }
 
-    /* 5. 设置量程（在 PWR 写入之后） */
-    ret = i2c_write_reg(QMA7981_REG_RANGE, (uint8_t)range);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "设置量程失败: %s (继续运行)", esp_err_to_name(ret));
-    }
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    /* 6. 标记为激活（PWR write 无 I2C 错误即认为成功） */
+    /* 6. 标记为激活 */
     s_sensor_active = true;
-    ESP_LOGI(TAG, "✅ 传感器已激活 (PWR=0xC0, RANGE=0x%02X)", (uint8_t)range);
+    ESP_LOGI(TAG, "✅ 传感器已激活 (PWR=0xC0, 默认 2g)");
 
-    /* 7. 尝试读取一次数据来验证 */
+    /* 7. 延时后读取一次数据验证 */
+    vTaskDelay(pdMS_TO_TICKS(50));
     uint8_t test_buf[6] = {0};
     ret = i2c_read_block(QMA7981_REG_XOUT_L, test_buf, 6);
     if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "验证原始字节: [%02X %02X] [%02X %02X] [%02X %02X]",
+                 test_buf[0], test_buf[1], test_buf[2],
+                 test_buf[3], test_buf[4], test_buf[5]);
         int16_t tx = (int16_t)((test_buf[0] & 0xFC) | ((uint16_t)test_buf[1] << 8)) / 4;
         int16_t ty = (int16_t)((test_buf[2] & 0xFC) | ((uint16_t)test_buf[3] << 8)) / 4;
         int16_t tz = (int16_t)((test_buf[4] & 0xFC) | ((uint16_t)test_buf[5] << 8)) / 4;
         ESP_LOGI(TAG, "验证读取: raw_x=%d, raw_y=%d, raw_z=%d", tx, ty, tz);
-        if (tx == 0 && ty == 0 && tz == 0) {
-            ESP_LOGW(TAG, "⚠️ 首次读取全零，可能需要等待传感器稳定");
-        }
     }
 
     return ESP_OK;
@@ -160,6 +146,7 @@ esp_err_t qma7981_read(qma7981_data_t *data)
         return ret;
     }
 
+    /* 与工作版本完全一致的解析逻辑 */
     int16_t raw_x = (int16_t)((buf[0] & 0xFC) | ((uint16_t)buf[1] << 8)) / 4;
     int16_t raw_y = (int16_t)((buf[2] & 0xFC) | ((uint16_t)buf[3] << 8)) / 4;
     int16_t raw_z = (int16_t)((buf[4] & 0xFC) | ((uint16_t)buf[5] << 8)) / 4;
@@ -168,10 +155,10 @@ esp_err_t qma7981_read(qma7981_data_t *data)
     data->raw_y = raw_y;
     data->raw_z = raw_z;
 
-    float full_scale_mg = range_to_mg(s_range);
-    data->ax_mg = (float)raw_x * full_scale_mg / 8192.0f;
-    data->ay_mg = (float)raw_y * full_scale_mg / 8192.0f;
-    data->az_mg = (float)raw_z * full_scale_mg / 8192.0f;
+    /* 默认 ±2g 量程，与工作版本一致 */
+    data->ax_mg = (float)raw_x * 2000.0f / 8191.0f;
+    data->ay_mg = (float)raw_y * 2000.0f / 8191.0f;
+    data->az_mg = (float)raw_z * 2000.0f / 8191.0f;
 
     return ESP_OK;
 }

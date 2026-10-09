@@ -27,7 +27,7 @@ menu "Week1 IMU Collector Configuration"
     config UPLOAD_INTERVAL_MS
         int "Upload Interval (milliseconds)"
         default 5000
-        range 1000 60000
+        range 200 60000
         help
             IMU 数据上传周期，单位毫秒
 

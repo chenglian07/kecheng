@@ -173,8 +173,8 @@ void app_main(void)
         /* 获取时间戳 */
         int64_t ts = get_timestamp();
 
-        /* 板端打印原始值 */
-        ESP_LOGI(TAG, "[#%d] raw_x=%d, raw_y=%d, raw_z=%d | ax=%.1f mg, ay=%.1f mg, az=%.1f mg | ts=%lld",
+        /* 板端打印原始值（DEBUG 级别减少串口开销） */
+        ESP_LOGD(TAG, "[#%d] raw_x=%d, raw_y=%d, raw_z=%d | ax=%.1f mg, ay=%.1f mg, az=%.1f mg | ts=%lld",
                  upload_count,
                  imu_data.raw_x, imu_data.raw_y, imu_data.raw_z,
                  imu_data.ax_mg, imu_data.ay_mg, imu_data.az_mg,
@@ -191,7 +191,9 @@ void app_main(void)
         ret = http_upload_imu_data(CONFIG_DEVICE_ID, &imu_data, ts);
         if (ret == ESP_OK) {
             upload_count++;
-            ESP_LOGI(TAG, "✅ 上传成功 (累计 %d 次)", upload_count);
+            if (upload_count % 10 == 0) {
+                ESP_LOGI(TAG, "✅ 已上传 %d 条数据", upload_count);
+            }
         } else {
             upload_fail_count++;
             ESP_LOGW(TAG, "⚠️ 上传失败 (累计失败 %d 次)", upload_fail_count);

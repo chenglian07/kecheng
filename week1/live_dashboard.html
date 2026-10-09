@@ -1,0 +1,120 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IMU 实时监控仪表盘</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1e293b,#0f172a);border-bottom:1px solid #334155;padding:16px 24px;display:flex;align-items:center;gap:16px}
+.header h1{font-size:20px;color:#f1f5f9}
+.header h1 span{color:#38bdf8}
+.header .badge{font-size:11px;padding:3px 10px;border-radius:12px;background:#1e3a5f;color:#7dd3fc;font-weight:500}
+.header .status-pill{margin-left:auto;display:flex;align-items:center;gap:8px;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:500}
+.status-pill.online{background:#052e16;color:#4ade80}
+.status-pill.offline{background:#450a0a;color:#f87171}
+.status-pill .dot{width:8px;height:8px;border-radius:50%}
+.status-pill.online .dot{background:#4ade80;animation:pulse 2s infinite}
+.status-pill.offline .dot{background:#f87171}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+.card{background:#1e293b;border-radius:16px;padding:24px 20px;text-align:center;border:1px solid #334155;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.card.axis-x::before{background:linear-gradient(90deg,#3b82f6,#60a5fa)}
+.card.axis-y::before{background:linear-gradient(90deg,#22c55e,#4ade80)}
+.card.axis-z::before{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.card .axis-label{font-size:12px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px}
+.card .value{font-size:36px;font-weight:700;font-family:"SF Mono","Fira Code",monospace;line-height:1.1}
+.card.axis-x .value{color:#60a5fa}
+.card.axis-y .value{color:#4ade80}
+.card.axis-z .value{color:#fbbf24}
+.card .unit{font-size:13px;color:#64748b;margin-top:4px}
+.raw-bar{background:#1e293b;border-radius:12px;padding:14px 20px;margin-bottom:20px;border:1px solid #334155;display:flex;align-items:center;gap:24px;font-family:"SF Mono","Fira Code",monospace;font-size:13px;flex-wrap:wrap}
+.raw-bar .label{color:#64748b;font-size:11px;text-transform:uppercase;letter-spacing:1px}
+.raw-bar .item{display:flex;align-items:center;gap:6px}
+.raw-bar .item .tag{color:#94a3b8}
+.raw-bar .item .val{color:#cbd5e1;font-weight:600}
+.raw-bar .sep{color:#334155}
+.raw-bar .meta{margin-left:auto;color:#64748b;font-size:12px}
+.chart-section{background:#1e293b;border-radius:16px;padding:20px;margin-bottom:20px;border:1px solid #334155}
+.chart-section h3{font-size:14px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+.chart-wrap{position:relative;height:280px}
+.table-section{background:#1e293b;border-radius:16px;padding:20px;border:1px solid #334155}
+.table-section h3{font-size:14px;color:#94a3b8;margin-bottom:12px;font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:8px 10px;color:#64748b;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #334155}
+tbody td{padding:8px 10px;border-bottom:1px solid #1e293b;font-family:"SF Mono","Fira Code",monospace;font-size:12px;color:#cbd5e1}
+tbody tr:hover{background:#0f172a}
+tbody tr:first-child{background:rgba(56,189,248,0.05)}
+tbody tr:first-child td{color:#f1f5f9;font-weight:600}
+.empty{text-align:center;padding:40px;color:#475569;font-size:14px}
+.footer{text-align:center;padding:16px;color:#475569;font-size:12px}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📡 <span>IMU</span> 实时监控</h1>
+  <span class="badge">ESP32-S3-EYE x QMA7981</span>
+  <div id="statusPill" class="status-pill offline">
+    <span class="dot"></span>
+    <span id="statusText">连接中...</span>
+  </div>
+</div>
+<div class="container">
+  <div class="cards">
+    <div class="card axis-x">
+      <div class="axis-label">X 轴加速度</div>
+      <div class="value" id="valX">--</div>
+      <div class="unit">mg</div>
+    </div>
+    <div class="card axis-y">
+      <div class="axis-label">Y 轴加速度</div>
+      <div class="value" id="valY">--</div>
+      <div class="unit">mg</div>
+    </div>
+    <div class="card axis-z">
+      <div class="axis-label">Z 轴加速度</div>
+      <div class="value" id="valZ">--</div>
+      <div class="unit">mg</div>
+    </div>
+  </div>
+  <div class="raw-bar">
+    <span class="label">原始值</span>
+    <div class="item"><span class="tag">X:</span><span class="val" id="rawX">--</span></div>
+    <span class="sep">|</span>
+    <div class="item"><span class="tag">Y:</span><span class="val" id="rawY">--</span></div>
+    <span class="sep">|</span>
+    <div class="item"><span class="tag">Z:</span><span class="val" id="rawZ">--</span></div>
+    <span class="sep">|</span>
+    <div class="item"><span class="tag">ChipID:</span><span class="val" id="chipId">--</span></div>
+    <span class="meta" id="lastUpdate">等待数据...</span>
+  </div>
+  <div class="chart-section">
+    <h3>📈 实时波形 (最近 30 条)</h3>
+    <div class="chart-wrap"><canvas id="waveChart"></canvas></div>
+  </div>
+  <div class="table-section">
+    <h3>📋 历史记录 (最新 50 条)</h3>
+    <div id="tableBody"><div class="empty">⏳ 正在加载数据...</div></div>
+  </div>
+</div>
+<div class="footer">Week 1 课程项目 - ESP32-S3-EYE + QMA7981 - 本地代理模式</div>
+<script>
+const API_URL='/api/imu?limit=50';
+const MAX_CHART=60;
+const ctx=document.getElementById('waveChart').getContext('2d');
+const chart=new Chart(ctx,{type:'line',data:{labels:[],datasets:[
+{label:'X (mg)',data:[],borderColor:'#60a5fa',backgroundColor:'rgba(96,165,250,0.1)',borderWidth:2,pointRadius:0,tension:0.3,fill:true},
+{label:'Y (mg)',data:[],borderColor:'#4ade80',backgroundColor:'rgba(74,222,128,0.1)',borderWidth:2,pointRadius:0,tension:0.3,fill:true},
+{label:'Z (mg)',data:[],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,0.1)',borderWidth:2,pointRadius:0,tension:0.3,fill:true}
+]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:0},interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{color:'#94a3b8',font:{size:12}}}},scales:{x:{ticks:{color:'#475569',font:{size:10},maxRotation:0},grid:{color:'#1e293b'}},y:{ticks:{color:'#475569',font:{size:10}},grid:{color:'#334155'}}}}});
+function fmtTime(ts){if(!ts)return'--';const d=typeof ts==='string'?new Date(ts):new Date(ts*1000);return d.toLocaleTimeString('zh-CN',{hour12:false})}
+async function fetchData(){try{const resp=await fetch(API_URL);if(!resp.ok)throw new Error('HTTP '+resp.status);const body=await resp.json();const records=body.records||[];if(records.length===0){document.getElementById('statusPill').className='status-pill offline';document.getElementById('statusText').textContent='暂无数据';return}
+const latest=records[0];document.getElementById('statusPill').className='status-pill online';document.getElementById('statusText').textContent=latest.device_id;document.getElementById('valX').textContent=latest.ax_mg.toFixed(1);document.getElementById('valY').textContent=latest.ay_mg.toFixed(1);document.getElementById('valZ').textContent=latest.az_mg.toFixed(1);document.getElementById('rawX').textContent=latest.raw_x;document.getElementById('rawY').textContent=latest.raw_y;document.getElementById('rawZ').textContent=latest.raw_z;document.getElementById('chipId').textContent=latest.chip_id||'--';document.getElementById('lastUpdate').textContent='最后更新: '+(latest.created_at||fmtTime(latest.timestamp));const chronological=[...records].reverse().slice(-MAX_CHART);chart.data.labels=chronological.map(r=>fmtTime(r.created_at||r.timestamp));chart.data.datasets[0].data=chronological.map(r=>r.ax_mg);chart.data.datasets[1].data=chronological.map(r=>r.ay_mg);chart.data.datasets[2].data=chronological.map(r=>r.az_mg);chart.update();let html='<table><thead><tr><th>#</th><th>时间</th><th>AX(mg)</th><th>AY(mg)</th><th>AZ(mg)</th><th>RawX</th><th>RawY</th><th>RawZ</th></tr></thead><tbody>';for(let i=0;i<records.length;i++){const r=records[i];html+='<tr><td>'+(r.id||(records.length-i))+'</td><td>'+(r.created_at||fmtTime(r.timestamp))+'</td><td style=color:#60a5fa>'+r.ax_mg.toFixed(1)+'</td><td style=color:#4ade80>'+r.ay_mg.toFixed(1)+'</td><td style=color:#fbbf24>'+r.az_mg.toFixed(1)+'</td><td>'+r.raw_x+'</td><td>'+r.raw_y+'</td><td>'+r.raw_z+'</td></tr>'}html+='</tbody></table>';document.getElementById('tableBody').innerHTML=html}catch(err){console.error('fetch error:',err);document.getElementById('statusPill').className='status-pill offline';document.getElementById('statusText').textContent='连接失败: '+err.message}}
+fetchData();setInterval(fetchData,500);
+</script>
+</body>
+</html>

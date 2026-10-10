@@ -1,0 +1,6 @@
+D:\Espressif\Espressif\tools\idf-python\3.11.2\python.exe: can't open file 'D:\\Espressif\\Espressif\\frameworks\\esp-idf-v5.4.4 \\tools\\idf_tools.py': [Errno 2] No such file or directory
+
+fatal: not a git repository: 'D:\Espressif\Espressif\frameworks\esp-idf-v5.4.4 \.git'
+WARNING: Git version unavailable, reading from source
+WARNING: Cannot find ESP-IDF version in version.cmake
+ESP-IDF version unknown

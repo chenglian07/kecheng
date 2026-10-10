@@ -252,3 +252,25 @@ def expire_old_commands(device_id: str | None = None, max_age_sec: int = 60):
         )
     conn.commit()
     conn.close()
+
+
+def query_recent_commands(device_id: str | None = None, limit: int = 20) -> list[dict]:
+    """查询最近的命令记录（用于 Web 展示）"""
+    conn = get_connection()
+    if device_id:
+        rows = conn.execute(
+            """SELECT * FROM commands
+               WHERE device_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (device_id, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM commands
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

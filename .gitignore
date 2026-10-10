@@ -8,11 +8,31 @@ sdkconfig.old
 firmware/main/secrets.h
 
 # Python
-server/__pycache__/
-server/sensor_data.db
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+server/.libs/
 
-# Build artifacts
+# SQLite database (binary, auto-generated)
+*.db
+
+# Build artifacts & logs (auto-generated, not source)
+*_log*.txt
+*_result*.txt
+*_output*.txt
+check*.txt
+db_*.txt
+env_check.txt
+idf_find*.txt
+idf_reg.txt
+pip_log.txt
+serial_*.txt
+flash_*.txt
+incr_*.txt
+server_log.txt
+build_log*.txt
+status_output.txt
 firmware/build_output*
 firmware/rebuild.cmd
 firmware/.clangd
@@ -25,3 +45,10 @@ firmware/.clangd
 *~
 .DS_Store
 Thumbs.db
+
+# Temporary helper scripts (regenerated each session)
+_gen_html.py
+_p[0-9].py
+_write_index.py
+_test_api.py
+_lan_test.py

@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from database import (
     init_db, insert_sensor_record, query_recent,
     create_command, get_pending_commands, update_command_status, get_command,
-    expire_old_commands,
+    expire_old_commands, query_recent_commands,
 )
 
 app = FastAPI(title="KECHENG Sensor API", version="0.2.0")
@@ -126,10 +126,21 @@ def create_collect_command(payload: CreateCommandPayload):
     return {"code": 0, "message": "command created", "data": cmd}
 
 
+# ⚠️ 固定路径必须放在 {path_param} 前面！
+@app.get("/api/commands/history")
+def command_history(
+    device_id: str | None = Query(None),
+    limit: int = Query(default=20, le=50),
+):
+    """查询最近的命令历史（Web 面板展示）"""
+    expire_old_commands(device_id)
+    commands = query_recent_commands(device_id, limit)
+    return {"code": 0, "data": commands}
+
+
 @app.get("/api/commands/{device_id}/pending")
 def poll_pending_commands(device_id: str):
     """设备轮询待处理命令（最多5条）"""
-    # 先清理过期命令
     expire_old_commands(device_id)
     commands = get_pending_commands(device_id)
     return {"code": 0, "data": commands}

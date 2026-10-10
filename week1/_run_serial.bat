@@ -1,0 +1,2 @@
+@echo off
+D:\Espressif\Espressif\python_env\idf5.4_py3.11_env\Scripts\python.exe d:\shangke\zhou\week1\_read_serial.py > d:\shangke\zhou\week1\serial_stdout2.txt 2> d:\shangke\zhou\week1\serial_stderr2.txt

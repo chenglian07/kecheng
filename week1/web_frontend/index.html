@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Week1 - ESP32-S3-EYE IMU 数据监控</title>
+    <title>Week1 - ESP32-S3-EYE IMU 六轴数据监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI','Microsoft YaHei',sans-serif; background: #0f1923; color: #e0e0e0; min-height: 100vh; }
@@ -34,6 +35,17 @@
         .stale-warning.show { display: flex; align-items: center; gap: 8px; }
         .no-data-msg { text-align: center; padding: 40px; color: #666; font-size: 16px; }
         .no-data-msg .icon { font-size: 48px; margin-bottom: 10px; }
+        .chart-card { background: linear-gradient(135deg,#1a2a3a,#1e3450); border: 1px solid #2a4a6a; border-radius: 12px; padding: 25px; margin-bottom: 20px; }
+        .chart-card h2 { font-size: 16px; color: #3498db; margin-bottom: 15px; }
+        .chart-wrap { position: relative; height: 300px; }
+        .derived-cards { display: grid; grid-template-columns: repeat(3,1fr); gap: 15px; margin-bottom: 20px; }
+        .derived-item { background: rgba(0,0,0,0.3); border-radius: 10px; padding: 18px; text-align: center; border: 1px solid rgba(42,74,106,0.4); }
+        .derived-item .dlabel { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+        .derived-item .dval { font-size: 28px; font-weight: bold; font-family: 'Consolas',monospace; }
+        .derived-item .dunit { font-size: 12px; color: #666; margin-left: 2px; }
+        .derived-item.mag .dval { color: #e67e22; }
+        .derived-item.pitch .dval { color: #9b59b6; }
+        .derived-item.roll .dval { color: #1abc9c; }
         .history-card { background: #1a2a3a; border: 1px solid #2a4a6a; border-radius: 12px; padding: 20px; overflow-x: auto; }
         .history-card h2 { font-size: 16px; color: #3498db; margin-bottom: 15px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -73,6 +85,20 @@
         <div id="latestContent"><div class="no-data-msg loading"><div class="icon">📡</div><div>正在连接后端，请稍候...</div></div></div>
         <div class="stale-warning" id="staleWarning">⏰ <strong>数据未更新</strong> — 最后数据时间：<span id="staleTime">--</span>，设备可能已停止采集。</div>
     </div>
+
+    <!-- 六轴派生值卡片 -->
+    <div class="derived-cards" id="derivedCards" style="display:none">
+        <div class="derived-item mag"><div class="dlabel">合成加速度 |a|</div><div class="dval"><span id="valMag">--</span><span class="dunit">mg</span></div></div>
+        <div class="derived-item pitch"><div class="dlabel">俯仰角 Pitch</div><div class="dval"><span id="valPitch">--</span><span class="dunit">°</span></div></div>
+        <div class="derived-item roll"><div class="dlabel">横滚角 Roll</div><div class="dval"><span id="valRoll">--</span><span class="dunit">°</span></div></div>
+    </div>
+
+    <!-- 六轴波形图 -->
+    <div class="chart-card" id="chartCard" style="display:none">
+        <h2>📈 六轴实时波形（最近 60 条）</h2>
+        <div class="chart-wrap"><canvas id="waveChart"></canvas></div>
+    </div>
+
     <div class="history-card">
         <h2>📋 历史记录（最新 50 条）</h2>
         <table>
@@ -87,6 +113,84 @@ const API_BASE = window.location.origin;
 let autoRefreshTimer = null;
 const STALE_THRESHOLD_SEC = 30;
 let lastDataTimestamp = 0;
+
+// ====== Chart.js 六轴波形 ======
+const MAX_CHART_POINTS = 60;
+let waveChart = null;
+
+function initChart() {
+    const ctx = document.getElementById('waveChart');
+    if (!ctx || typeof Chart === 'undefined') return;
+    waveChart = new Chart(ctx.getContext('2d'), {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                { label: 'X (mg)',    data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.08)',  borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                { label: 'Y (mg)',    data: [], borderColor: '#2ecc71', backgroundColor: 'rgba(46,204,113,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                { label: 'Z (mg)',    data: [], borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                { label: '|a| (mg)',  data: [], borderColor: '#e67e22', backgroundColor: 'rgba(230,126,34,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                { label: 'Pitch (\u00b0)', data: [], borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true },
+                { label: 'Roll (\u00b0)',  data: [], borderColor: '#1abc9c', backgroundColor: 'rgba(26,188,156,0.08)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 },
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+            scales: {
+                x: { ticks: { color: '#475569', font: { size: 10 }, maxRotation: 0 }, grid: { color: '#1e293b' } },
+                y: { ticks: { color: '#475569', font: { size: 10 } }, grid: { color: '#334155' } }
+            }
+        }
+    });
+}
+
+function computeDerived(ax, ay, az) {
+    const mag = Math.sqrt(ax * ax + ay * ay + az * az);
+    const pitch = Math.atan2(ax, Math.sqrt(ay * ay + az * az)) * 180 / Math.PI;
+    const roll  = Math.atan2(ay, Math.sqrt(ax * ax + az * az)) * 180 / Math.PI;
+    return { mag, pitch, roll };
+}
+
+function updateChart(records) {
+    if (!waveChart) initChart();
+    if (!waveChart) return;
+    // chronological order (oldest first)
+    const chrono = [...records].reverse().slice(-MAX_CHART_POINTS);
+    waveChart.data.labels = chrono.map(r => {
+        const d = new Date(r.timestamp * 1000);
+        return d.toLocaleTimeString('zh-CN', { hour12: false });
+    });
+    waveChart.data.datasets[0].data = chrono.map(r => r.ax_mg);
+    waveChart.data.datasets[1].data = chrono.map(r => r.ay_mg);
+    waveChart.data.datasets[2].data = chrono.map(r => r.az_mg);
+    waveChart.data.datasets[3].data = chrono.map(r => {
+        const d = computeDerived(r.ax_mg, r.ay_mg, r.az_mg);
+        return d.mag;
+    });
+    waveChart.data.datasets[4].data = chrono.map(r => {
+        const d = computeDerived(r.ax_mg, r.ay_mg, r.az_mg);
+        return d.pitch;
+    });
+    waveChart.data.datasets[5].data = chrono.map(r => {
+        const d = computeDerived(r.ax_mg, r.ay_mg, r.az_mg);
+        return d.roll;
+    });
+    waveChart.update();
+}
+
+function updateDerivedCards(r) {
+    const d = computeDerived(r.ax_mg, r.ay_mg, r.az_mg);
+    document.getElementById('valMag').textContent   = d.mag.toFixed(1);
+    document.getElementById('valPitch').textContent = d.pitch.toFixed(1);
+    document.getElementById('valRoll').textContent  = d.roll.toFixed(1);
+    document.getElementById('derivedCards').style.display = 'grid';
+    document.getElementById('chartCard').style.display = 'block';
+}
+
 
 document.addEventListener('DOMContentLoaded', () => {
     loadDevices(); refreshData(); startAutoRefresh();
@@ -124,6 +228,8 @@ async function refreshData() {
         if (data.records && data.records.length > 0) {
             renderLatest(data.records[0]);
             renderHistory(data.records);
+            updateDerivedCards(data.records[0]);
+            updateChart(data.records);
             lastDataTimestamp = data.records[0].timestamp;
             checkStale();
         } else { showNoData(); }
@@ -188,6 +294,8 @@ function hideError() { document.getElementById('errorBanner').classList.remove('
 function showNoData() {
     document.getElementById('latestContent').innerHTML = '<div class="no-data-msg"><div class="icon">📭</div><div>暂无 IMU 数据</div><div style="font-size:13px;color:#555;margin-top:5px">请确认 ESP32 已开机并连接 WiFi 上传数据。</div></div>';
     document.getElementById('historyBody').innerHTML = '<tr><td colspan="11" class="no-data-msg">暂无数据</td></tr>';
+    document.getElementById('derivedCards').style.display = 'none';
+    document.getElementById('chartCard').style.display = 'none';
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 setInterval(checkStale, 5000);

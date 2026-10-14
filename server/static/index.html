@@ -150,7 +150,8 @@ async function fetchData(){
     let h='<table><thead><tr><th>时间</th><th>设备</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>类型</th><th>RequestID</th></tr></thead><tbody>';
     for(const rec of recs){
       const bd=rec.request_id?'<span class="bcl">远程采集</span>':'<span class="bok">周期</span>';
-      h+='<tr><td>'+fmtS(rec.ts_device)+'</td><td style="font-family:inherit">'+(rec.device_id||'')+'</td><td>'+rec.ax.toFixed(4)+'</td><td>'+rec.ay.toFixed(4)+'</td><td>'+rec.az.toFixed(4)+'</td><td>'+bd+'</td><td style="font-size:10px;color:#666">'+(rec.request_id?sid(rec.request_id):'--')+'</td></tr>';
+      const tm=rec.ts_server?fmtT(rec.ts_server):'--';
+      h+='<tr><td>'+tm+'</td><td style="font-family:inherit">'+(rec.device_id||'')+'</td><td>'+rec.ax.toFixed(4)+'</td><td>'+rec.ay.toFixed(4)+'</td><td>'+rec.az.toFixed(4)+'</td><td>'+bd+'</td><td style="font-size:10px;color:#666">'+(rec.request_id?sid(rec.request_id):'--')+'</td></tr>';
     }
     h+='</tbody></table>';TB.innerHTML=h;
   }catch(e){console.error(e);SD.className='sd off';ST.textContent='连接失败: '+e.message}

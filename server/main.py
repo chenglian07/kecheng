@@ -17,7 +17,7 @@ import sys
 # 确保可以 import database.py
 sys.path.insert(0, os.path.dirname(__file__))
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -72,6 +72,40 @@ def on_startup():
 
 
 # ---------- Sensor data API ----------
+
+@app.post("/api/imu")
+async def ingest_imu_compat(request: Request):
+    """兼容 Week 1 固件 /api/imu 路径（接受旧 JSON 格式并转换入库）
+
+    Week 1 JSON: device_id, timestamp, ax_mg, ay_mg, az_mg, raw_x, raw_y, raw_z, chip_id
+    Week 2 JSON: device_id, ts_device, ax, ay, az, raw, ...  (与 /api/ingest 相同)
+    """
+    body = await request.json()
+
+    # 检测 Week 1 旧格式（含 ax_mg 字段）
+    if "ax_mg" in body:
+        raw = [
+            int(body.get("raw_x", 0)),
+            int(body.get("raw_y", 0)),
+            int(body.get("raw_z", 0)),
+        ]
+        payload = SensorPayload(
+            device_id=str(body.get("device_id", "unknown")),
+            sensor="qma7981",
+            ts_device=float(body.get("timestamp", 0)),
+            ax=float(body.get("ax_mg", 0)) / 1000.0,
+            ay=float(body.get("ay_mg", 0)) / 1000.0,
+            az=float(body.get("az_mg", 0)) / 1000.0,
+            unit="g",
+            raw=raw,
+            status="ok",
+        )
+    else:
+        # Week 2 格式，直接用 SensorPayload 校验
+        payload = SensorPayload(**body)
+
+    return ingest_data(payload)
+
 
 @app.post("/api/ingest")
 def ingest_data(payload: SensorPayload):

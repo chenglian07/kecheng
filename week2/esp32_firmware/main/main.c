@@ -51,11 +51,11 @@ static void sntp_sync_callback(struct timeval *tv)
 static void init_sntp(void)
 {
     ESP_LOGI(TAG, "正在同步 SNTP 时间...");
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
-    sntp_setservername(1, "time.windows.com");
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setservername(1, "time.windows.com");
     sntp_set_time_sync_notification_cb(sntp_sync_callback);
-    sntp_init();
+    esp_sntp_init();
     for (int i = 0; i < 30 && !s_time_synced; i++) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

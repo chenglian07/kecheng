@@ -28,12 +28,17 @@
 #include "cJSON.h"
 #include <string.h>
 #include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "HTTP_UPLOAD";
 
 static char s_ingest_url[160];
 static char s_cmd_base_url[160];
 static esp_http_client_handle_t s_client = NULL;
+
+/* 互斥锁：防止周期上报任务与命令轮询任务并发访问同一个 HTTP 客户端 */
+static SemaphoreHandle_t s_http_mutex = NULL;
 
 /* ---------- 内部：构建 IMU JSON ---------- */
 
@@ -73,6 +78,15 @@ static esp_err_t do_http_req(const char *url,
                               char **resp_body)
 {
     if (!s_client) return ESP_FAIL;
+
+    /* 加互斥锁：最多等待 5 秒，防止两个任务并发访问 HTTP 客户端 */
+    if (s_http_mutex) {
+        if (xSemaphoreTake(s_http_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            ESP_LOGW(TAG, "HTTP mutex timeout, skipping request to %s", url);
+            return ESP_ERR_TIMEOUT;
+        }
+    }
+
     esp_http_client_set_url(s_client, url);
     esp_http_client_set_method(s_client, method);
     if (post_body) {
@@ -85,11 +99,13 @@ static esp_err_t do_http_req(const char *url,
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "HTTP fail [%s]: %s", url, esp_err_to_name(err));
         esp_http_client_cleanup(s_client);
-        esp_http_client_config_t cfg = { .url = s_ingest_url, .timeout_ms = 5000, .buffer_size = 1024 };
+        esp_http_client_config_t cfg = { .url = s_ingest_url, .timeout_ms = 10000, .buffer_size = 1024, .transport_type = HTTP_TRANSPORT_OVER_TCP };
         s_client = esp_http_client_init(&cfg);
+        if (s_http_mutex) xSemaphoreGive(s_http_mutex);
         return err;
     }
     int status = esp_http_client_get_status_code(s_client);
+    ESP_LOGD(TAG, "HTTP %s %s → %d", method == HTTP_METHOD_GET ? "GET" : method == HTTP_METHOD_POST ? "POST" : "PUT", url, status);
     if (out_status) *out_status = status;
     if (resp_body) {
         int clen = esp_http_client_get_content_length(s_client);
@@ -102,6 +118,8 @@ static esp_err_t do_http_req(const char *url,
             else { free(buf); *resp_body = NULL; }
         }
     }
+
+    if (s_http_mutex) xSemaphoreGive(s_http_mutex);
     return ESP_OK;
 }
 
@@ -113,8 +131,19 @@ esp_err_t http_upload_init(void)
     snprintf(s_cmd_base_url, sizeof(s_cmd_base_url), "%s/api/commands", CONFIG_SERVER_URL);
     ESP_LOGI(TAG, "Ingest URL: %s", s_ingest_url);
     ESP_LOGI(TAG, "Commands URL: %s", s_cmd_base_url);
+
+    /* 创建 HTTP 互斥锁（仅创建一次） */
+    if (!s_http_mutex) {
+        s_http_mutex = xSemaphoreCreateMutex();
+        if (!s_http_mutex) {
+            ESP_LOGE(TAG, "Failed to create HTTP mutex");
+            return ESP_FAIL;
+        }
+        ESP_LOGI(TAG, "HTTP mutex created");
+    }
+
     if (s_client) { esp_http_client_cleanup(s_client); s_client = NULL; }
-    esp_http_client_config_t config = { .url = s_ingest_url, .timeout_ms = 5000, .buffer_size = 1024 };
+    esp_http_client_config_t config = { .url = s_ingest_url, .timeout_ms = 10000, .buffer_size = 1024, .transport_type = HTTP_TRANSPORT_OVER_TCP };
     s_client = esp_http_client_init(&config);
     if (!s_client) { ESP_LOGE(TAG, "HTTP init failed"); return ESP_FAIL; }
     return ESP_OK;

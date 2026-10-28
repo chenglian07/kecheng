@@ -52,3 +52,28 @@ _p[0-9].py
 _write_index.py
 _test_api.py
 _lan_test.py
+_*.bat
+_*.pid
+_run_*.py
+_diag.txt
+_run_diag.py
+_start_and_test.py
+
+# ESP-IDF helper scripts & logs
+**/server.log
+**/server2.log
+**/server_output*.log
+**/uvicorn.log
+**/build_output*.log
+**/clean_build_log*.txt
+**/rebuild.cmd
+
+# Week-specific build scripts (one-off, not part of source)
+week*/esp32_firmware/build_it.bat
+week*/esp32_firmware/flash_monitor.bat
+week*/esp32_firmware/run_idf.bat
+
+# Python venv
+venv/
+.venv/
+*.egg-info/

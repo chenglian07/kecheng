@@ -9,7 +9,8 @@ esp_err_t http_post_json(const char *url, const char *json)
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_POST,
-        .timeout_ms = 5000,
+        .timeout_ms = 10000,
+        .transport_type = HTTP_TRANSPORT_OVER_TCP,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);

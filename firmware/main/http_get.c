@@ -11,7 +11,8 @@ esp_err_t http_get_text(const char *url, char **out_buf, size_t *out_len)
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_GET,
-        .timeout_ms = 5000,
+        .timeout_ms = 10000,
+        .transport_type = HTTP_TRANSPORT_OVER_TCP,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);

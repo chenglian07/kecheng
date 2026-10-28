@@ -13,12 +13,13 @@
 
 import os
 import sys
+from time import time
 
 # 确保可以 import database.py
 sys.path.insert(0, os.path.dirname(__file__))
 
 from fastapi import FastAPI, Query, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -56,7 +57,7 @@ class CreateCommandPayload(BaseModel):
     command_type: str = "collect_once"
     sensor: str = "qma7981"
     params: str | None = None
-    timeout_sec: int = 30
+    timeout_sec: int = 60
 
 
 class UpdateCommandPayload(BaseModel):
@@ -69,6 +70,14 @@ class UpdateCommandPayload(BaseModel):
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+
+# ---------- Server time API ----------
+
+@app.get("/api/server_time")
+def get_server_time():
+    """返回服务器当前 Unix 时间戳（用于前端倒计时同步）"""
+    return {"code": 0, "server_time": time()}
 
 
 # ---------- Sensor data API ----------
@@ -177,7 +186,7 @@ def poll_pending_commands(device_id: str):
     """设备轮询待处理命令（最多5条）"""
     expire_old_commands(device_id)
     commands = get_pending_commands(device_id)
-    return {"code": 0, "data": commands}
+    return {"code": 0, "data": commands, "server_time": time()}
 
 
 @app.put("/api/commands/{request_id}")
@@ -205,7 +214,7 @@ def get_command_status(request_id: str):
     cmd = get_command(request_id)
     if not cmd:
         raise HTTPException(status_code=404, detail="Command not found")
-    return {"code": 0, "data": cmd}
+    return {"code": 0, "data": cmd, "server_time": time()}
 
 
 # ---------- Web ----------
@@ -216,7 +225,11 @@ def index():
     index_path = os.path.join(static_dir, "index.html")
     if os.path.isfile(index_path):
         with open(index_path, encoding="utf-8") as f:
-            return f.read()
+            content = f.read()
+        return HTMLResponse(
+            content=content,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+        )
     return HTMLResponse("<h1>KECHENG Sensor Dashboard</h1><p>index.html not found</p>")
 
 

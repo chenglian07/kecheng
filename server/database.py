@@ -135,7 +135,7 @@ def create_command(
     command_type: str = "collect_once",
     sensor: str = "qma7981",
     params: str | None = None,
-    timeout_sec: int = 30,
+    timeout_sec: int = 60,
 ) -> dict:
     """创建一条命令，返回完整记录"""
     request_id = str(uuid.uuid4())
@@ -161,28 +161,20 @@ def create_command(
 
 
 def get_pending_commands(device_id: str, limit: int = 5) -> list[dict]:
-    """获取设备待处理的命令"""
-    now_str = datetime.now(timezone.utc).isoformat()
+    """获取设备待处理的命令（仅返回未过期的 pending 命令，不做状态变更）"""
+    from time import time
+    now = time()
     conn = get_connection()
     rows = conn.execute(
         """SELECT * FROM commands
            WHERE device_id = ? AND status = 'pending'
+             AND (ts_expire IS NULL OR ts_expire > ?)
            ORDER BY created_at ASC
            LIMIT ?""",
-        (device_id, limit),
+        (device_id, now, limit),
     ).fetchall()
     conn.close()
-    # 检查是否超时
-    results = []
-    for r in rows:
-        r = dict(r)
-        if r["ts_expire"]:
-            from time import time
-            if time() > r["ts_expire"]:
-                update_command_status(r["request_id"], "timeout")
-                continue
-        results.append(r)
-    return results
+    return [dict(r) for r in rows]
 
 
 def update_command_status(
@@ -234,22 +226,48 @@ def get_command(request_id: str) -> dict | None:
 
 
 def expire_old_commands(device_id: str | None = None, max_age_sec: int = 60):
-    """将超时的 pending 命令标记为 timeout"""
+    """将超时的 pending / received 命令标记为 timeout
+    
+    - pending 超时：由 ts_expire 字段控制（创建时设定）
+    - received 超时：如果命令已标记 received 但超过 120 秒仍未 completed，也视为超时
+    """
     from time import time
     now = time()
     conn = get_connection()
+
+    # 1. 超时 pending 命令（由 ts_expire 控制）
     if device_id:
         conn.execute(
             """UPDATE commands SET status = 'timeout'
-               WHERE device_id = ? AND status = 'pending' AND ts_expire IS NOT NULL AND ts_expire < ?""",
+               WHERE device_id = ? AND status = 'pending'
+                 AND ts_expire IS NOT NULL AND ts_expire < ?""",
             (device_id, now),
+        )
+        # 2. 超时 received 命令（已接收但 120 秒未完成）
+        #    使用 strftime('%s') 代替 julianday 避免浮点精度丢失
+        conn.execute(
+            """UPDATE commands SET status = 'timeout'
+               WHERE device_id = ? AND status = 'received'
+                 AND received_at IS NOT NULL
+                 AND CAST(strftime('%s', 'now') AS REAL)
+                   - CAST(strftime('%s', received_at) AS REAL) > 120""",
+            (device_id,),
         )
     else:
         conn.execute(
             """UPDATE commands SET status = 'timeout'
-               WHERE status = 'pending' AND ts_expire IS NOT NULL AND ts_expire < ?""",
+               WHERE status = 'pending'
+                 AND ts_expire IS NOT NULL AND ts_expire < ?""",
             (now,),
         )
+        conn.execute(
+            """UPDATE commands SET status = 'timeout'
+               WHERE status = 'received'
+                 AND received_at IS NOT NULL
+                 AND CAST(strftime('%s', 'now') AS REAL)
+                   - CAST(strftime('%s', received_at) AS REAL) > 120""",
+        )
+
     conn.commit()
     conn.close()
 

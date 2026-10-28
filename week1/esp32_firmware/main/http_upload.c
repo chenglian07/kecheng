@@ -41,7 +41,8 @@ esp_err_t http_upload_init(void)
     }
     esp_http_client_config_t config = {
         .url = s_upload_url,
-        .timeout_ms = 3000,
+        .timeout_ms = 10000,
+        .transport_type = HTTP_TRANSPORT_OVER_TCP,  /* 显式指定纯 TCP，避免走 TLS 路径 */
     };
     s_client = esp_http_client_init(&config);
     if (!s_client) {
@@ -103,7 +104,8 @@ esp_err_t http_upload_imu_data(const char *device_id,
         esp_http_client_cleanup(s_client);
         esp_http_client_config_t config = {
             .url = s_upload_url,
-            .timeout_ms = 3000,
+            .timeout_ms = 10000,
+            .transport_type = HTTP_TRANSPORT_OVER_TCP,
         };
         s_client = esp_http_client_init(&config);
     }

@@ -28,7 +28,9 @@ extern "C" {
 #define QMA7981_I2C_FREQ_HZ    400000   /* 400kHz Fast Mode */
 
 /* 寄存器地址 */
-#define QMA7981_REG_CHIP_ID     0x00    /* 期望值 0xB3 */
+#define QMA7981_REG_CHIP_ID     0x00    /* 期望值 0x90（数据手册）；实测 ESP32-S3-EYE 返回 0xB3 亦正常 */
+#define QMA7981_CHIP_ID_EXPECT  0x90    /* 数据手册标称值 */
+#define QMA7981_CHIP_ID_ALT     0xB3    /* ESP32-S3-EYE 实测值 */
 #define QMA7981_REG_XOUT_L      0x01
 #define QMA7981_REG_XOUT_H      0x02
 #define QMA7981_REG_YOUT_L      0x03

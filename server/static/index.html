@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>EgoLink W2 Remote Collect</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -94,88 +97,108 @@ tr:hover td{background:#1a1d24}
 <div style="max-height:400px;overflow-y:auto" id="tableBody"><div class="em">暂无数据，等待板端上传...</div></div></div>
 </div>
 <script>
-const DEVICES=new Set(),TB=document.getElementById('tableBody'),SD=document.getElementById('statusDot'),ST=document.getElementById('statusText'),LU=document.getElementById('lastUpdate'),BTN=document.getElementById('btnCollect'),CC=document.getElementById('cmdCard'),CT=document.getElementById('cmdTimer'),CE=document.getElementById('cmdError'),CR=document.getElementById('cmdResult'),CRI=document.getElementById('cmdReqId');
-let sRid=null,sPT=null,sT0=null;
-function fmtT(s){if(!s)return'--';return new Date(s).toLocaleTimeString('zh-CN',{hour12:false})}
-function fmtS(s){if(s==null)return'--';return new Date(s*1000).toLocaleTimeString('zh-CN',{hour12:false})}
-function sid(s){return s?s.substring(0,8)+'...':'--'}
-function us(id,st){const e=document.getElementById(id);if(!e)return;e.className='ts';if(st)e.classList.add(st)}
-function uc(id,d){const e=document.getElementById(id);if(!e)return;e.className='tc'+(d?' d':'')}
-function reset(){us('s1','a');us('s2','');us('s3','');us('s4','');uc('c1',0);uc('c2',0);uc('c3',0);CT.textContent='';CE.textContent='';CR.textContent=''}
+var DEVICES=new Set();
+var _tblBuilt=false;
+var TB=document.getElementById('tableBody');
+var SD=document.getElementById('statusDot');
+var ST=document.getElementById('statusText');
+var LU=document.getElementById('lastUpdate');
+var _failCount=0,FAIL_THRESHOLD=3,_serverOffsetMs=0;
+var CT=document.getElementById('cmdTimer');
+var BTN=document.getElementById('btnCollect');
+var CMD_CARD=document.getElementById('cmdCard');
+function sid(s){return s?s.substring(0,8)+'\u2026':s||''}
+function fmtT(s){if(!s)return'--';var d=new Date(s);return isNaN(d)?s:d.toLocaleTimeString('zh-CN',{hour12:false})}
+function us(id,cls){var el=document.getElementById(id);el.classList.remove('a','d','f');el.classList.add(cls)}
+function uc(id,ok){var el=document.getElementById(id);el.classList.remove('d','dof');el.classList.add(ok?'d':'dof')}
+async function syncServerTime(){try{var t0=Date.now();var r=await fetch('/api/server_time');var t1=Date.now();if(r.ok){var b=await r.json();if(b.server_time){var rtt=t1-t0;_serverOffsetMs=b.server_time*1000+(rtt/2)-(t0+t1)/2;console.log('ServerTime offset='+_serverOffsetMs.toFixed(0)+'ms RTT='+rtt+'ms')}}}catch(e){}}
+function serverNowMs(){return Date.now()+_serverOffsetMs}
+async function fetchData(){try{
+var dev=document.getElementById('deviceSelect').value;
+var u=dev?'/api/data?device_id='+encodeURIComponent(dev)+'&limit=20':'/api/data?limit=20';
+var resp=await fetch(u);if(!resp.ok)throw new Error('HTTP '+resp.status);
+var b=await resp.json();if(b.code!==0)throw new Error('API error');
+var recs=b.data||[];
+if(recs.length>0){var latest=recs[0];
+var latestMs=Date.parse(latest.ts_server);
+var isRecent=!isNaN(latestMs)&&(serverNowMs()-latestMs)<10000;
+if(isRecent){SD.className='sd on';ST.innerHTML='<strong>'+latest.device_id+'</strong>';
+}else if(!sPollId){SD.className='sd off';ST.textContent='\u8bbe\u5907\u79bb\u7ebf\uff08\u65e0\u65b0\u6570\u636e\uff09';}
+LU.textContent='\u66f4\u65b0: '+fmtT(latest.ts_server);
+if(!sPollId){us('s1','d');us('s2','d');us('s3','d');us('s4','d');uc('c1',1);uc('c2',1);uc('c3',1);
+document.getElementById('cmdTitle').textContent='\u2705 \u8bbe\u5907\u5728\u7ebf \u00b7 \u6570\u636e\u6301\u7eed\u91c7\u96c6\u4e2d';}
+document.getElementById('valX').textContent=(latest.ax!=null?latest.ax:0).toFixed(4);
+document.getElementById('valY').textContent=(latest.ay!=null?latest.ay:0).toFixed(4);
+document.getElementById('valZ').textContent=(latest.az!=null?latest.az:0).toFixed(4);
+document.getElementById('rawX').textContent=latest.raw_x!=null?latest.raw_x:'--';
+document.getElementById('rawY').textContent=latest.raw_y!=null?latest.raw_y:'--';
+document.getElementById('rawZ').textContent=latest.raw_z!=null?latest.raw_z:'--';
+recs.forEach(function(x){if(x.device_id)DEVICES.add(x.device_id)});updDevSel();_failCount=0;
+}else{if(!sPollId){SD.className='sd off';ST.textContent='\u6682\u65e0\u6570\u636e';LU.textContent='';}
+['valX','valY','valZ','rawX','rawY','rawZ'].forEach(function(i){document.getElementById(i).textContent='--'});_failCount=0;}
+document.getElementById('dataCount').textContent=recs.length+' \u6761';
+if(!recs.length){TB.innerHTML='<div class="em">\u6682\u65e0\u6570\u636e</div>';_tblBuilt=false;return}
+if(!_tblBuilt){TB.innerHTML='<table><thead><tr><th>\u65f6\u95f4</th><th>\u8bbe\u5907</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>\u7c7b\u578b</th><th>ID</th></tr></thead><tbody id="tRows"></tbody></table>';_tblBuilt=true;}
+var tr=document.getElementById('tRows'),h='';
+for(var i=0;i<recs.length;i++){var rc=recs[i];
+var bd=rc.request_id?'<span class="bcl">\u8fdc\u7a0b\u91c7\u96c6</span>':'<span class="bok">\u5468\u671f</span>';
+var tm=rc.ts_server?fmtT(rc.ts_server):'--';
+h+='<tr><td>'+tm+'</td><td style="font-family:inherit">'+(rc.device_id||'')+'</td><td>'+(rc.ax!=null?rc.ax.toFixed(4):'--')+'</td><td>'+(rc.ay!=null?rc.ay.toFixed(4):'--')+'</td><td>'+(rc.az!=null?rc.az.toFixed(4):'--')+'</td><td>'+bd+'</td><td style="font-size:10px;color:#666">'+rc.id+'</td></tr>';}
+tr.innerHTML=h;
+}catch(e){_failCount++;console.error('fetchData('+_failCount+'/'+FAIL_THRESHOLD+'):',e);
+if(_failCount>=FAIL_THRESHOLD){SD.className='sd off';ST.textContent='\u8fde\u63a5\u5931\u8d25('+_failCount+'\u6b21): '+e.message;}}}
+async function fetchCmdHistory(){try{
+const dev=document.getElementById('deviceSelect').value;
+const u=dev?'/api/commands/history?device_id='+encodeURIComponent(dev)+'&limit=20':'/api/commands/history?limit=20';
+const r=await fetch(u);if(!r.ok)return;const b=await r.json();const cmds=b.data||[];
+document.getElementById('cmdHistCnt').textContent=cmds.length+' \u6761';
+const el=document.getElementById('cmdHistList');
+if(!cmds.length){el.innerHTML='<div class="em">\u6682\u65e0\u91c7\u96c6\u4efb\u52a1</div>';return}
+let h='';const st={'pending':'\u5f85\u5904\u7406','received':'\u5df2\u63a5\u6536','completed':'\u5df2\u5b8c\u6210','timeout':'\u8d85\u65f6','failed':'\u5931\u8d25'};
+const bc={'pending':'bp','received':'br','completed':'bo','timeout':'bt','failed':'bt'};
+for(const c of cmds)h+='<div class="ci"><span class="csb '+(bc[c.status]||'bt')+'">'+(st[c.status]||c.status)+'</span><span class="cid" title="'+c.request_id+'">'+sid(c.request_id)+'</span><span class="ctm">'+fmtT(c.created_at)+'</span></div>';
+el.innerHTML=h;}catch(e){console.error(e)}}
+function updDevSel(){const sel=document.getElementById('deviceSelect'),cv=sel.value,ds=Array.from(DEVICES).sort();
+sel.innerHTML='<option value="">\u5168\u90e8\u8bbe\u5907</option>';
+ds.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;if(d===cv)o.selected=true;sel.appendChild(o)});}
+var sRid=null,sPollId=null,sT0=null,sPollBusy=false,CMD_TIMEOUT_MS=70000;
 async function collectOnce(){
-  const dev=document.getElementById('deviceSelect').value;
-  if(!dev){CE.textContent='请先选择设备';CC.style.display='';return}
-  BTN.disabled=true;BTN.textContent='⏳ 下发中...';reset();CC.style.display='';
-  document.getElementById('cmdTitle').textContent='远程采集状态';CRI.textContent='';sT0=Date.now();
-  try{
-    const r=await fetch('/api/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:dev,command_type:'collect_once',timeout_sec:30})});
-    const b=await r.json();if(b.code!==0)throw new Error(b.message||'创建失败');
-    sRid=b.data.request_id;CRI.textContent=sid(sRid);CT.textContent='⏱ 已提交，等待设备...';pollCmd(sRid);
-  }catch(e){CE.textContent='❌ '+e.message;us('s1','f');BTN.disabled=false;BTN.textContent='🎯 采集一次最新数据'}
-}
-async function pollCmd(rid){
-  if(sPT){clearTimeout(sPT);sPT=null}
-  try{
-    const r=await fetch('/api/commands/'+rid),b=await r.json();
-    if(b.code!==0)throw new Error(b.message);
-    const cmd=b.data,el=((Date.now()-sT0)/1000).toFixed(1);
-    switch(cmd.status){
-      case'pending':us('s1','a');us('s2','');us('s3','');us('s4','');uc('c1',0);uc('c2',0);uc('c3',0);CT.textContent='⏱ 等待设备... ('+el+'s)';break;
-      case'received':us('s1','d');us('s2','a');us('s3','');us('s4','');uc('c1',1);uc('c2',0);uc('c3',0);CT.textContent='⏱ 设备已接收... ('+el+'s)';break;
-      case'completed':us('s1','d');us('s2','d');us('s3','d');us('s4','');uc('c1',1);uc('c2',1);uc('c3',0);CT.textContent='✅ 完成 '+el+'s';CR.textContent='result_id: '+(cmd.result_id||'--');document.getElementById('cmdTitle').textContent='✅ 采集完成';BTN.disabled=false;BTN.textContent='🎯 采集一次最新数据';fetchData();fetchCmdHistory();return;
-      case'timeout':us('s1','d');us('s2','f');us('s3','');us('s4','f');uc('c1',1);uc('c2',0);uc('c3',1);CT.textContent='⏱ 超时 '+el+'s';CE.textContent='❌ 设备未响应，可能已断电';document.getElementById('cmdTitle').textContent='❌ 超时';BTN.disabled=false;BTN.textContent='🎯 采集一次最新数据';fetchCmdHistory();return;
-      case'failed':us('s1','d');us('s2','d');us('s3','f');us('s4','');uc('c1',1);uc('c2',1);uc('c3',0);CE.textContent='❌ 设备采集失败';document.getElementById('cmdTitle').textContent='❌ 失败';BTN.disabled=false;BTN.textContent='🎯 采集一次最新数据';fetchCmdHistory();return;
-      default:CT.textContent='⏱ '+cmd.status+' '+el+'s';
-    }
-    if(parseFloat(el)<40)sPT=setTimeout(()=>pollCmd(rid),1000);
-    else{CE.textContent='❌ 超时';us('s1','d');us('s2','f');us('s4','f');uc('c1',1);uc('c3',1);document.getElementById('cmdTitle').textContent='❌ 超时';BTN.disabled=false;BTN.textContent='🎯 采集一次最新数据';fetchCmdHistory()}
-  }catch(e){CE.textContent='❌ '+e.message;sPT=setTimeout(()=>pollCmd(rid),2000)}
-}
-async function fetchData(){
-  try{
-    const dev=document.getElementById('deviceSelect').value;
-    const u=dev?'/api/data?device_id='+encodeURIComponent(dev)+'&limit=50':'/api/data?limit=50';
-    const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);
-    const b=await r.json();if(b.code!==0)throw new Error(b.message);
-    const recs=b.data||[];
-    if(recs.length>0){
-      SD.className='sd on';ST.innerHTML='<strong>'+recs[0].device_id+'</strong>';LU.textContent='更新: '+fmtT(recs[0].ts_server);
-      const r=recs[0];
-      document.getElementById('valX').textContent=r.ax.toFixed(4);document.getElementById('valY').textContent=r.ay.toFixed(4);document.getElementById('valZ').textContent=r.az.toFixed(4);
-      document.getElementById('rawX').textContent=r.raw_x;document.getElementById('rawY').textContent=r.raw_y;document.getElementById('rawZ').textContent=r.raw_z;
-      recs.forEach(r=>DEVICES.add(r.device_id));updDevSel();
-    }else{SD.className='sd off';ST.textContent='暂无数据';LU.textContent='';['valX','valY','valZ','rawX','rawY','rawZ'].forEach(i=>document.getElementById(i).textContent='--')}
-    document.getElementById('dataCount').textContent=recs.length+' 条';
-    if(!recs.length){TB.innerHTML='<div class="em">暂无数据</div>';return}
-    let h='<table><thead><tr><th>时间</th><th>设备</th><th>X(g)</th><th>Y(g)</th><th>Z(g)</th><th>类型</th><th>RequestID</th></tr></thead><tbody>';
-    for(const rec of recs){
-      const bd=rec.request_id?'<span class="bcl">远程采集</span>':'<span class="bok">周期</span>';
-      const tm=rec.ts_server?fmtT(rec.ts_server):'--';
-      h+='<tr><td>'+tm+'</td><td style="font-family:inherit">'+(rec.device_id||'')+'</td><td>'+rec.ax.toFixed(4)+'</td><td>'+rec.ay.toFixed(4)+'</td><td>'+rec.az.toFixed(4)+'</td><td>'+bd+'</td><td style="font-size:10px;color:#666">'+(rec.request_id?sid(rec.request_id):'--')+'</td></tr>';
-    }
-    h+='</tbody></table>';TB.innerHTML=h;
-  }catch(e){console.error(e);SD.className='sd off';ST.textContent='连接失败: '+e.message}
-}
-async function fetchCmdHistory(){
-  try{
-    const dev=document.getElementById('deviceSelect').value;
-    const u=dev?'/api/commands/history?device_id='+encodeURIComponent(dev)+'&limit=20':'/api/commands/history?limit=20';
-    const r=await fetch(u);if(!r.ok)return;const b=await r.json();const cmds=b.data||[];
-    document.getElementById('cmdHistCnt').textContent=cmds.length+' 条';
-    const el=document.getElementById('cmdHistList');
-    if(!cmds.length){el.innerHTML='<div class="em">暂无采集任务</div>';return}
-    let h='';const st={'pending':'待处理','received':'已接收','completed':'已完成','timeout':'超时','failed':'失败'};
-    const bc={'pending':'bp','received':'br','completed':'bo','timeout':'bt','failed':'bt'};
-    for(const c of cmds)h+='<div class="ci"><span class="csb '+(bc[c.status]||'bt')+'">'+(st[c.status]||c.status)+'</span><span class="cid" title="'+c.request_id+'">'+sid(c.request_id)+'</span><span class="ctm">'+fmtT(c.created_at)+'</span></div>';
-    el.innerHTML=h;
-  }catch(e){console.error(e)}
-}
-function updDevSel(){
-  const sel=document.getElementById('deviceSelect'),cv=sel.value,ds=Array.from(DEVICES).sort();
-  sel.innerHTML='<option value="">全部设备</option>';
-  ds.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;if(d===cv)o.selected=true;sel.appendChild(o)});
-}
-fetchData();fetchCmdHistory();setInterval(fetchData,3000);setInterval(fetchCmdHistory,5000);
+var dev=document.getElementById('deviceSelect').value;
+if(!dev){alert('\u8bf7\u5148\u9009\u62e9\u4e00\u4e2a\u8bbe\u5907');return}
+BTN.disabled=true;BTN.textContent='\u23f3 \u4e0b\u53d1\u4e2d...';CMD_CARD.style.display='';
+try{await syncServerTime();
+var resp=await fetch('/api/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:dev,timeout_sec:60})});
+var b=await resp.json();if(b.code!==0)throw new Error('\u521b\u5efa\u547d\u4ee4\u5931\u8d25');
+sRid=b.data.request_id;sT0=Date.parse(b.data.created_at);us('s1','a');
+CT.textContent='\u547d\u4ee4\u5df2\u4e0b\u53d1\uff0c\u7b49\u5f85\u8bbe\u5907\u54cd\u5e94...';
+if(sPollId)clearInterval(sPollId);sPollBusy=false;sPollId=setInterval(pollStatus,1500);
+}catch(e){BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';
+CT.textContent='\u274c '+e.message;us('s1','f');}}
+async function pollStatus(){if(sPollBusy)return;sPollBusy=true;
+try{var resp=await fetch('/api/commands/'+sRid);
+if(!resp.ok){sPollBusy=false;return}
+var b=await resp.json();var cmd=b.data;if(!cmd){sPollBusy=false;return}
+var createdMs=Date.parse(cmd.created_at);
+var nowMs=b.server_time?b.server_time*1000:serverNowMs();
+var el=(nowMs-createdMs)/1000;if(el<0)el=0;
+var elStr=el.toFixed(1),st=cmd.status;
+if(st==='pending'){CT.textContent='\u7b49\u5f85\u8bbe\u5907\u8f6e\u8be2... '+elStr+'s / 60s'}
+else if(st==='received'){us('s1','d');us('s2','a');CT.textContent='\u8bbe\u5907\u5df2\u63a5\u6536\uff0c\u6b63\u5728\u4e0a\u4f20\u6570\u636e... '+elStr+'s'}
+else if(st==='completed'){us('s1','d');us('s2','d');us('s3','d');us('s4','d');uc('c1',1);uc('c2',1);uc('c3',1);
+CT.textContent='\u2705 \u91c7\u96c6\u5b8c\u6210\uff01\u7528\u65f6 '+elStr+'s';
+document.getElementById('cmdTitle').textContent='\u2705 \u8fdc\u7a0b\u91c7\u96c6\u6210\u529f';
+clearInterval(sPollId);sPollId=null;BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';fetchData();fetchCmdHistory();}
+else if(st==='timeout'){us('s1','f');us('s2','f');CT.textContent='\u23f0 \u547d\u4ee4\u8d85\u65f6 ('+elStr+'s)';
+document.getElementById('cmdTitle').textContent='\u23f0 \u547d\u4ee4\u8d85\u65f6';
+clearInterval(sPollId);sPollId=null;BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';fetchCmdHistory();}
+else if(st==='failed'){us('s1','f');us('s2','f');CT.textContent='\u274c \u547d\u4ee4\u6267\u884c\u5931\u8d25 ('+elStr+'s)';
+document.getElementById('cmdTitle').textContent='\u274c \u547d\u4ee4\u5931\u8d25';
+clearInterval(sPollId);sPollId=null;BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';fetchCmdHistory();}
+if((nowMs-createdMs)>CMD_TIMEOUT_MS&&(st==='pending'||st==='received')){
+us('s1','f');us('s2','f');CT.textContent='\u23f0 \u5ba2\u6237\u7aef\u8d85\u65f6 ('+elStr+'s)';
+clearInterval(sPollId);sPollId=null;BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';fetchCmdHistory();}
+}catch(e){console.error('pollStatus error:',e)}sPollBusy=false;}
+syncServerTime();fetchData();fetchCmdHistory();setInterval(fetchData,3000);setInterval(fetchCmdHistory,5000);setInterval(syncServerTime,60000);
 </script>
 </body>
 </html>

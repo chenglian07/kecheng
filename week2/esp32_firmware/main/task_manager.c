@@ -114,6 +114,9 @@ static void task_manager_loop(void *arg)
         cJSON *data = cJSON_GetObjectItem(root, "data");
 
         if (!code || code->valueint != 0 || !data || !cJSON_IsArray(data)) {
+            ESP_LOGD(TAG, "轮询响应: code=%d, data_type=%s",
+                     code ? code->valueint : -1,
+                     data ? (cJSON_IsArray(data) ? "array" : "other") : "null");
             cJSON_Delete(root);
             continue;
         }
@@ -123,6 +126,8 @@ static void task_manager_loop(void *arg)
             cJSON_Delete(root);
             continue;
         }
+
+        ESP_LOGI(TAG, "📬 收到 %d 条 pending 命令", arr_size);
 
         /* 取第一条 pending 命令 */
         cJSON *cmd = cJSON_GetArrayItem(data, 0);

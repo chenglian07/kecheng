@@ -1,6 +1,8 @@
 idf_component_register(SRCS "main.c" "qma7981.c" "wifi_conn.c" "http_post.c" "http_get.c" "cmd_poll.c"
+                            "sos_button.c" "sos_feedback.c" "sos_event.c"
                     INCLUDE_DIRS "."
                     REQUIRES esp_driver_i2c
+                             esp_driver_gpio
                              esp_event
                              esp_http_client
                              esp_netif

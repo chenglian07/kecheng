@@ -20,7 +20,7 @@ menu "Week1 IMU Collector Configuration"
 
     config DEVICE_ID
         string "Device ID (本组唯一标识)"
-        default "group_01"
+        default "my-esp32"
         help
             每组独立的设备 ID，用于区分不同设备
 

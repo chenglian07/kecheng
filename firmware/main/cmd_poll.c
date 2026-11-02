@@ -2,6 +2,7 @@
 #include "http_get.h"
 #include "http_post.h"
 #include "qma7981.h"
+#include "sos_event.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -148,6 +149,42 @@ static void handle_command(cJSON *cmd)
         }
         // 标记命令完成
         send_command_ack(request_id, "completed");
+
+    /* --- Week 3: SOS 回应 --- */
+    } else if (strcmp(command_type, "sos_response") == 0) {
+        cJSON *event_id_item = cJSON_GetObjectItem(cmd, "event_id");
+        cJSON *viewer_ack_at_item = cJSON_GetObjectItem(cmd, "viewer_ack_at");
+
+        if (cJSON_IsString(event_id_item)) {
+            const char *event_id = event_id_item->valuestring;
+            const char *viewer_ack_at = cJSON_IsString(viewer_ack_at_item)
+                                        ? viewer_ack_at_item->valuestring : NULL;
+
+            ESP_LOGI(TAG, "SOS response received: event_id=%s", event_id);
+            sos_event_handle_response(event_id, viewer_ack_at);
+            send_command_ack(request_id, "completed");
+        } else {
+            ESP_LOGW(TAG, "sos_response missing event_id");
+            send_command_ack(request_id, "failed");
+        }
+
+    /* --- Week 3: SOS 取消 --- */
+    } else if (strcmp(command_type, "sos_cancel") == 0) {
+        cJSON *event_id_item = cJSON_GetObjectItem(cmd, "event_id");
+        cJSON *cancelled_at_item = cJSON_GetObjectItem(cmd, "cancelled_at");
+
+        if (cJSON_IsString(event_id_item)) {
+            const char *event_id = event_id_item->valuestring;
+            const char *cancelled_at = cJSON_IsString(cancelled_at_item)
+                                       ? cancelled_at_item->valuestring : NULL;
+
+            ESP_LOGI(TAG, "SOS cancel received: event_id=%s", event_id);
+            sos_event_handle_cancel(event_id, cancelled_at);
+            send_command_ack(request_id, "completed");
+        } else {
+            ESP_LOGW(TAG, "sos_cancel missing event_id");
+            send_command_ack(request_id, "failed");
+        }
 
     } else {
         ESP_LOGW(TAG, "unknown command type: %s", command_type);

@@ -73,7 +73,18 @@ week*/esp32_firmware/build_it.bat
 week*/esp32_firmware/flash_monitor.bat
 week*/esp32_firmware/run_idf.bat
 
+# Build logs & temp check files
+**/_last_build.log
+_check.html
+
 # Python venv
 venv/
 .venv/
 *.egg-info/
+
+# Local push/debug artifacts (one-off, not source)
+_push_*.log
+_push_err.txt
+uvicorn_test.log
+root_response.txt
+

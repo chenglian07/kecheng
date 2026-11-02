@@ -313,7 +313,7 @@
     <span id="statusText">在线</span>
   </div>
   <button class="btn" onclick="location.reload()"> 刷新</button>
-  <button class="btn" id="btnAuto" onclick="toggleAuto()">自动 0.5s</button>
+  <button class="btn" id="btnAuto" onclick="toggleAuto()" style="background:#22c55e;color:#fff">⏸ 自动 0.5s</button>
 </div>
 
 <!-- Main content -->
@@ -438,7 +438,7 @@
 <script>
 // ========== Configuration ==========
 const BUFFER_SIZE = 60;
-const POLL_INTERVAL = 100; // ms - match firmware 10Hz rate
+const POLL_INTERVAL = 500; // ms - match ESP32 ~1s upload rate
 
 // ========== State ==========
 let bufferAX = [];
@@ -624,18 +624,34 @@ function drawWaveform() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Draw lines
+  // Draw smooth lines with quadratic Bezier curves
   function drawLine(buffer, color) {
     if (buffer.length < 2) return;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    for (let i = 0; i < buffer.length; i++) {
-      const x = (i / (BUFFER_SIZE - 1)) * w;
-      const y = zeroY - buffer[i] * scaleY;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+
+    // Convert buffer to screen coordinates
+    const points = buffer.map((val, i) => ({
+      x: (i / (BUFFER_SIZE - 1)) * w,
+      y: zeroY - val * scaleY
+    }));
+
+    // Start at first point
+    ctx.moveTo(points[0].x, points[0].y);
+
+    // Use quadratic Bezier curves through midpoints for smooth interpolation
+    for (let i = 1; i < points.length - 1; i++) {
+      const midX = (points[i].x + points[i + 1].x) / 2;
+      const midY = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, midX, midY);
     }
+
+    // Final segment to last point
+    const last = points[points.length - 1];
+    ctx.lineTo(last.x, last.y);
     ctx.stroke();
   }
 
@@ -776,9 +792,32 @@ function togglePause() {
   document.getElementById('btnPause').textContent = isPaused ? '▶ 继续' : ' 暂停';
 }
 
+let _dashPollTimer = null;
 function toggleAuto() {
   autoRefresh = !autoRefresh;
-  document.getElementById('btnAuto').textContent = autoRefresh ? '自动 0.1s' : '手动';
+  var btn = document.getElementById('btnAuto');
+  if (autoRefresh) {
+    btn.textContent = '⏸ 自动 0.5s';
+    btn.style.background = '#22c55e';
+    btn.style.color = '#fff';
+    isPaused = false;
+    document.getElementById('btnPause').textContent = '⏸ 暂停';
+    startDashPoll();
+  } else {
+    btn.textContent = '▶ 已暂停';
+    btn.style.background = '#ef4444';
+    btn.style.color = '#fff';
+    isPaused = true;
+    document.getElementById('btnPause').textContent = '▶ 继续';
+    stopDashPoll();
+  }
+}
+function startDashPoll() {
+  if (_dashPollTimer) clearInterval(_dashPollTimer);
+  _dashPollTimer = setInterval(fetchData, POLL_INTERVAL);
+}
+function stopDashPoll() {
+  if (_dashPollTimer) { clearInterval(_dashPollTimer); _dashPollTimer = null; }
 }
 
 function changeZoom() {
@@ -787,7 +826,7 @@ function changeZoom() {
 
 // ========== Main loop ==========
 fetchData();
-setInterval(fetchData, POLL_INTERVAL);
+startDashPoll();
 </script>
 
 </body>

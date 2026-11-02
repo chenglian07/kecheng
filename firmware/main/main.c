@@ -8,11 +8,30 @@
 #include "wifi_conn.h"
 #include "http_post.h"
 #include "cmd_poll.h"
+#include "sos_button.h"
+#include "sos_feedback.h"
+#include "sos_event.h"
 
 /* secrets.h 由使用者从 secrets_template.h 复制并填充 */
 #include "secrets.h"
 
 static const char *TAG = "main";
+
+/* ---------- Week 3: SOS 按键回调 ---------- */
+
+/**
+ * @brief 按键按下时的回调函数
+ *
+ * 此函数在按键检测任务中调用，触发 SOS 求助事件。
+ * 断网时仍可触发，进入 local_ack 状态。
+ */
+static void on_sos_button_pressed(bool pressed)
+{
+    if (pressed) {
+        ESP_LOGI(TAG, "SOS button pressed, triggering event");
+        sos_event_trigger();
+    }
+}
 
 /* ---------- 串口 JSON 输出 ---------- */
 
@@ -88,7 +107,7 @@ static void upload_sensor_data(const qma7981_accel_t *accel)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "=== KECHENG Week2 ===");
+    ESP_LOGI(TAG, "=== KECHENG Week3 ===");
     ESP_LOGI(TAG, "device_id = %s", DEVICE_ID);
     ESP_LOGI(TAG, "I2C: SDA=GPIO4  SCL=GPIO5  target addr=0x%02X", QMA7981_ADDR);
 
@@ -118,18 +137,37 @@ void app_main(void)
         ESP_LOGI(TAG, "QMA7981 CHIP_ID = 0x%02X (unexpected, but non-zero)", chip_id);
     }
 
-    /* ---- 4. 连接 WiFi ---- */
+    /* ---- 4. Week 3: 初始化 SOS 反馈模块（LED/蜂鸣器，无硬件时仅串口） ---- */
+    ret = sos_feedback_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "sos_feedback_init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+
+    /* ---- 5. Week 3: 初始化 SOS 事件模块 ---- */
+    ret = sos_event_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "sos_event_init failed: %s", esp_err_to_name(ret));
+    }
+
+    /* ---- 6. Week 3: 初始化 SOS 按键（GPIO0 BOOT键，内部上拉） ---- */
+    ret = sos_button_init(on_sos_button_pressed);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "sos_button_init failed: %s", esp_err_to_name(ret));
+    }
+
+    /* ---- 7. 连接 WiFi ---- */
     ESP_LOGI(TAG, "connecting WiFi...");
     ret = wifi_connect(20000);  /* 最多等 20 秒 */
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "WiFi connect failed, continue without network");
+        ESP_LOGW(TAG, "SOS button still works in offline mode (local_ack only)");
     } else {
         ESP_LOGI(TAG, "WiFi connected");
         /* 启动命令轮询任务 */
         cmd_poll_start();
     }
 
-    /* ---- 5. 循环读取加速度 + 串口输出 + HTTP 上传 ---- */
+    /* ---- 8. 循环读取加速度 + 串口输出 + HTTP 上传 ---- */
     ESP_LOGI(TAG, "--- start periodic reading (100ms interval, ~10Hz) ---");
     vTaskDelay(pdMS_TO_TICKS(100));
 

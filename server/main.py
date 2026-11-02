@@ -27,6 +27,9 @@ from database import (
     init_db, insert_sensor_record, query_recent,
     create_command, get_pending_commands, update_command_status, get_command,
     expire_old_commands, query_recent_commands,
+    # Week 3: 求助事件
+    insert_help_event, get_help_event, update_help_event_status,
+    query_help_events, expire_help_events,
 )
 
 app = FastAPI(title="KECHENG Sensor API", version="0.2.0")
@@ -63,6 +66,23 @@ class CreateCommandPayload(BaseModel):
 class UpdateCommandPayload(BaseModel):
     status: str  # 'received', 'completed'
     result_id: int | None = None
+
+
+# Week 3: 求助事件 Pydantic models
+class CreateHelpEventPayload(BaseModel):
+    event_id: str
+    device_id: str
+    source: str = "button"  # "button" = 真实按键, "test" = 模拟
+    ts_created: float | None = None
+    ts_local_ack: float | None = None
+
+
+class AckHelpEventPayload(BaseModel):
+    viewer_name: str | None = None
+
+
+class CancelHelpEventPayload(BaseModel):
+    reason: str | None = None
 
 
 # ---------- Lifecycle ----------
@@ -215,6 +235,177 @@ def get_command_status(request_id: str):
     if not cmd:
         raise HTTPException(status_code=404, detail="Command not found")
     return {"code": 0, "data": cmd, "server_time": time()}
+
+
+# ---------- Week 3: 求助事件 API ----------
+
+@app.post("/api/help_events")
+def create_help_event(payload: CreateHelpEventPayload):
+    """
+    板端上报求助事件
+    
+    服务端成功接收后写入 server_received_at，状态设为 delivered。
+    
+    curl 测试:
+    curl -X POST http://localhost:8000/api/help_events \
+      -H "Content-Type: application/json" \
+      -d '{"event_id":"SOS-TEST-001","device_id":"g02-s20251040108-esp32s3eye","source":"button"}'
+    """
+    # 检查 event_id 是否已存在
+    existing = get_help_event(payload.event_id)
+    if existing:
+        return {"code": 0, "message": "event already exists", "data": existing}
+
+    event = insert_help_event(
+        event_id=payload.event_id,
+        device_id=payload.device_id,
+        source=payload.source,
+    )
+    return {"code": 0, "message": "event created", "data": event, "server_time": time()}
+
+
+@app.get("/api/help_events")
+def list_help_events(
+    device_id: str | None = Query(None),
+    status: str | None = Query(None),
+    limit: int = Query(default=20, le=100),
+):
+    """
+    查询求助事件列表
+    
+    curl 测试:
+    curl http://localhost:8000/api/help_events
+    curl "http://localhost:8000/api/help_events?device_id=g02-s20251040108-esp32s3eye"
+    curl "http://localhost:8000/api/help_events?status=delivered"
+    """
+    expire_help_events()
+    events = query_help_events(device_id, status, limit)
+    return {"code": 0, "data": events, "server_time": time()}
+
+
+@app.get("/api/help_events/{event_id}")
+def get_help_event_status(event_id: str):
+    """
+    查询单个求助事件状态
+    
+    curl 测试:
+    curl http://localhost:8000/api/help_events/SOS-TEST-001
+    """
+    event = get_help_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return {"code": 0, "data": event, "server_time": time()}
+
+
+@app.put("/api/help_events/{event_id}/ack")
+def acknowledge_help_event(event_id: str, payload: AckHelpEventPayload):
+    """
+    查看者回应求助事件
+    
+    业务规则：
+    - 仅在 status == "delivered" 时允许改为 acknowledged
+    - 若已是 cancelled，返回 409 Conflict，不得复活
+    
+    curl 测试:
+    curl -X PUT http://localhost:8000/api/help_events/SOS-TEST-001/ack \
+      -H "Content-Type: application/json" \
+      -d '{"viewer_name":"teacher"}'
+    """
+    event = get_help_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    current_status = event["status"]
+
+    # 已取消 → 409
+    if current_status == "cancelled":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Event already cancelled, cannot acknowledge. "
+                   f"cancelled_at={event.get('cancelled_at')}"
+        )
+
+    # 已回应 → 幂等
+    if current_status == "acknowledged":
+        return {"code": 0, "message": "already acknowledged", "data": event}
+
+    # 仅 delivered 可回应
+    if current_status != "delivered":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot acknowledge event in status '{current_status}'. "
+                   f"Must be 'delivered'."
+        )
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    updated = update_help_event_status(event_id, "acknowledged", viewer_ack_at=now)
+    return {"code": 0, "message": "acknowledged", "data": updated, "server_time": time()}
+
+
+@app.put("/api/help_events/{event_id}/cancel")
+def cancel_help_event(event_id: str, payload: CancelHelpEventPayload):
+    """
+    取消求助事件
+    
+    业务规则：
+    - delivered / acknowledged → cancelled
+    - 已 cancelled → 幂等（409 不报错，返回当前状态）
+    - local_ack / uploading 也可取消
+    
+    curl 测试:
+    curl -X PUT http://localhost:8000/api/help_events/SOS-TEST-001/cancel \
+      -H "Content-Type: application/json" \
+      -d '{}'
+    """
+    event = get_help_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    current_status = event["status"]
+
+    # 已取消 → 幂等
+    if current_status == "cancelled":
+        return {"code": 0, "message": "already cancelled", "data": event}
+
+    # 终态检查（acknowledged 也可取消，failed/timeout 也可取消）
+    if current_status in ("delivered", "acknowledged", "local_ack", "uploading", "failed", "timeout"):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        updated = update_help_event_status(event_id, "cancelled", cancelled_at=now)
+        return {"code": 0, "message": "cancelled", "data": updated, "server_time": time()}
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Cannot cancel event in status '{current_status}'."
+    )
+
+
+@app.get("/api/help_events/{device_id}/pending_response")
+def poll_help_event_response(device_id: str):
+    """
+    板端轮询回应/取消命令
+    
+    返回该设备所有需要板端处理的求助事件状态变更。
+    仅返回 delivered 后已被回应或取消的事件。
+    
+    curl 测试:
+    curl http://localhost:8000/api/help_events/g02-s20251040108-esp32s3eye/pending_response
+    """
+    expire_help_events()
+    # 查询该设备所有已回应或已取消的事件
+    conn_events = query_help_events(device_id, None, 50)
+    pending = []
+    for evt in conn_events:
+        if evt["status"] in ("acknowledged", "cancelled"):
+            pending.append({
+                "event_id": evt["event_id"],
+                "command_type": "sos_response" if evt["status"] == "acknowledged" else "sos_cancel",
+                "status": evt["status"],
+                "viewer_ack_at": evt.get("viewer_ack_at"),
+                "cancelled_at": evt.get("cancelled_at"),
+            })
+    return {"code": 0, "data": pending, "server_time": time()}
 
 
 # ---------- Web ----------

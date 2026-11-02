@@ -7,6 +7,8 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>EgoLink W2 Remote Collect</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh}
@@ -14,6 +16,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .topbar .logo{font-size:18px;font-weight:700;color:#f0a500}.topbar .logo span{color:#4fc3f7}
 .topbar .wtag{font-size:10px;padding:2px 8px;border-radius:4px;background:#f0a500;color:#000;font-weight:700;margin-left:8px}
 .topbar select{margin-left:auto;background:#1e2128;border:1px solid #2d3139;color:#e0e0e0;padding:6px 12px;border-radius:6px;font-size:13px}
+.rt-btn{margin-left:12px;padding:7px 18px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all .25s;letter-spacing:.5px}
+.rt-btn.on{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;box-shadow:0 0 14px rgba(34,197,94,.35)}
+.rt-btn.off{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;box-shadow:0 0 14px rgba(239,68,68,.35)}
+.rt-btn:hover{transform:scale(1.06);filter:brightness(1.1)}
+.rt-btn:active{transform:scale(.97)}
 .topbar .sb{display:flex;align-items:center;gap:6px;font-size:13px;margin-left:16px}
 .sd{width:8px;height:8px;border-radius:50%;background:#555;transition:background .3s}.sd.on{background:#22c55e;box-shadow:0 0 6px #22c55e88}.sd.off{background:#ef4444}
 .container{max-width:1100px;margin:0 auto;padding:16px}
@@ -25,7 +32,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft Y
 .ch .ic{margin-right:8px}.ch .mt{margin-left:auto;font-size:11px;color:#666;font-weight:400}
 .cb{padding:16px}
 .ax{text-align:center}.ax .al{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:2px;margin-bottom:4px}
-.ax .av{font-size:32px;font-weight:700;font-family:"SF Mono",Monaco,monospace}.ax .au{font-size:12px;color:#666;margin-top:2px}
+.ax .av{font-size:32px;font-weight:700;font-family:"SF Mono",Monaco,monospace;transition:color .3s,transform .15s;display:inline-block}.ax .au{font-size:12px;color:#666;margin-top:2px}
 .axx .av{color:#42a5f5}.axy .av{color:#66bb6a}.axz .av{color:#ffa726}
 .rr{display:flex;gap:16px;font-family:"SF Mono",Monaco,monospace;font-size:13px;color:#999;padding:8px 0;border-bottom:1px solid #1e2128}
 .rr:last-child{border-bottom:none}.rr .lb{color:#666;width:60px}
@@ -56,12 +63,16 @@ tr:hover td{background:#1a1d24}
 .bok{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;background:#1a3d1a;color:#4ade80}
 .bcl{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;background:#1e3a5f;color:#60a5fa}
 .em{text-align:center;padding:40px 16px;color:#555;font-size:14px}
+.chart-box{width:100%;height:320px}
+.three-box{width:100%;height:320px;position:relative}
+.three-label{position:absolute;bottom:8px;left:0;right:0;text-align:center;font-size:11px;color:#666;pointer-events:none}
 </style>
 </head>
 <body>
 <div class="topbar">
 <div class="logo">Ego<span>Link</span></div><span class="wtag">WEEK 2</span>
 <select id="deviceSelect" onchange="fetchData();fetchCmdHistory()"><option value="">全部设备</option><option value="g02-s20251040108-esp32s3eye">g02-s20251040108-esp32s3eye</option></select>
+<button id="rtBtn" class="rt-btn on" onclick="toggleAutoRefresh()">⏸️ 暂停实时更新</button>
 <div class="sb"><span class="sd" id="statusDot"></span><span id="statusText" style="color:#888">等待连接...</span></div>
 </div>
 <div class="container">
@@ -84,6 +95,13 @@ tr:hover td{background:#1a1d24}
 <div class="cd ax axy"><div class="cb"><div class="al">Axis Y</div><div class="av" id="valY">--</div><div class="au">g</div></div></div>
 <div class="cd ax axz"><div class="cb"><div class="al">Axis Z</div><div class="av" id="valZ">--</div><div class="au">g</div></div></div>
 </div>
+<!-- 三轴实时折线图 + 3D 姿态展示 -->
+<div class="g2">
+<div class="cd"><div class="ch"><span class="ic">📈</span>三轴加速度波形<span class="mt">滚动窗口 100 点</span></div>
+<div class="cb"><div id="imuChart" class="chart-box"></div></div></div>
+<div class="cd"><div class="ch"><span class="ic">🧊</span>3D 姿态实时展示<span class="mt">加速度计倾斜</span></div>
+<div class="cb"><div id="imu3D" class="three-box"></div><div class="three-label">基于加速度计的重力倾斜演示</div></div></div>
+</div>
 <div class="g2">
 <div class="cd"><div class="ch"><span class="ic">🔢</span>原始值 (14-bit)</div><div class="cb">
 <div class="rr"><span class="lb">Raw X</span><span id="rawX">--</span></div>
@@ -94,10 +112,24 @@ tr:hover td{background:#1a1d24}
 <div class="cl" id="cmdHistList"><div class="em">暂无采集任务</div></div></div>
 </div>
 <div class="cd"><div class="ch"><span class="ic">📊</span>IMU 数据记录<span class="mt" id="dataCount"></span></div>
+
+<!-- Week 3: 教学求助事件面板 -->
+<div class="cd" style="margin-bottom:16px">
+<div class="ch"><span class="ic">🆘</span>教学求助事件 (Week3)<span class="mt" id="heCount"></span>
+<span style="margin-left:auto;font-size:10px;color:#888;font-weight:400">
+⚠️ 本次运行无物理LED/蜂鸣器，本地反馈以串口日志为证据 | 物理反馈: <b style="color:#f0a500">待补验</b>
+</span></div>
+<div style="padding:8px 16px;background:#1a1d24;border-bottom:1px solid #2a2d35">
+<button class="bc" style="padding:8px 20px;font-size:13px" onclick="fetchHelpEvents()">🔄 刷新事件</button>
+<button class="bc" style="padding:8px 20px;font-size:13px;margin-left:8px;background:linear-gradient(135deg,#f0a500,#d97706)" onclick="createTestEvent()">🧪 创建模拟事件</button>
+</div>
+<div id="helpEventsList" style="padding:12px 16px"><div class="em">暂无求助事件</div></div>
+</div>
+
 <div style="max-height:400px;overflow-y:auto" id="tableBody"><div class="em">暂无数据，等待板端上传...</div></div></div>
 </div>
 <script>
-var DEVICES=new Set();
+var DEVICES=new Set();var _chart=null,_pollTimer=null,_autoRefresh=true;
 var _tblBuilt=false;
 var TB=document.getElementById('tableBody');
 var SD=document.getElementById('statusDot');
@@ -133,6 +165,8 @@ document.getElementById('valZ').textContent=(latest.az!=null?latest.az:0).toFixe
 document.getElementById('rawX').textContent=latest.raw_x!=null?latest.raw_x:'--';
 document.getElementById('rawY').textContent=latest.raw_y!=null?latest.raw_y:'--';
 document.getElementById('rawZ').textContent=latest.raw_z!=null?latest.raw_z:'--';
+updateImuChart(latest.ax||0,latest.ay||0,latest.az||0);
+updateImu3D(latest.ax||0,latest.ay||0,latest.az||0);
 recs.forEach(function(x){if(x.device_id)DEVICES.add(x.device_id)});updDevSel();_failCount=0;
 }else{if(!sPollId){SD.className='sd off';ST.textContent='\u6682\u65e0\u6570\u636e';LU.textContent='';}
 ['valX','valY','valZ','rawX','rawY','rawZ'].forEach(function(i){document.getElementById(i).textContent='--'});_failCount=0;}
@@ -198,7 +232,238 @@ if((nowMs-createdMs)>CMD_TIMEOUT_MS&&(st==='pending'||st==='received')){
 us('s1','f');us('s2','f');CT.textContent='\u23f0 \u5ba2\u6237\u7aef\u8d85\u65f6 ('+elStr+'s)';
 clearInterval(sPollId);sPollId=null;BTN.disabled=false;BTN.textContent='\ud83d\udce1 \u91c7\u96c6\u4e00\u6b21\u6700\u65b0\u6570\u636e';fetchCmdHistory();}
 }catch(e){console.error('pollStatus error:',e)}sPollBusy=false;}
-syncServerTime();fetchData();fetchCmdHistory();setInterval(fetchData,3000);setInterval(fetchCmdHistory,5000);setInterval(syncServerTime,60000);
+syncServerTime();fetchData();fetchCmdHistory();
+function startPolling(){if(_pollTimer)clearInterval(_pollTimer);_pollTimer=setInterval(fetchData,500);}
+function stopPolling(){if(_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}}
+function toggleAutoRefresh(){_autoRefresh=!_autoRefresh;var btn=document.getElementById('rtBtn');if(_autoRefresh){btn.className='rt-btn on';btn.textContent='⏸️ 暂停实时更新';startPolling();}else{btn.className='rt-btn off';btn.textContent='▶️ 开始实时更新';stopPolling();}}
+startPolling();
+
+// ========== Week 3: 求助事件 ==========
+var _heTestCounter = 100;
+var HE_STYLES = {
+  local_ack:'background:#3b82f620;color:#60a5fa;border:1px solid #3b82f640',
+  uploading:'background:#8b5cf620;color:#a78bfa;border:1px solid #8b5cf640',
+  delivered:'background:#f59e0b20;color:#fbbf24;border:1px solid #f59e0b40',
+  acknowledged:'background:#22c55e20;color:#4ade80;border:1px solid #22c55e40',
+  cancelled:'background:#ef444420;color:#f87171;border:1px solid #ef444440',
+  failed:'background:#dc262620;color:#ef4444;border:1px solid #dc262640',
+  timeout:'background:#6b728020;color:#9ca3af;border:1px solid #6b728040'
+};
+var HE_LABELS = {local_ack:'🔵 本地已确认',uploading:'🟣 上传中',delivered:'🟡 已送达',
+  acknowledged:'🟢 已回应',cancelled:'🔴 已取消',failed:'❌ 上传失败',timeout:'⚫ 超时/未送达'};
+
+async function fetchHelpEvents(){
+  try{
+    var dev=document.getElementById('deviceSelect').value;
+    var u=dev?'/api/help_events?device_id='+encodeURIComponent(dev)+'&limit=20':'/api/help_events?limit=20';
+    var resp=await fetch(u);if(!resp.ok)throw new Error('HTTP '+resp.status);
+    var b=await resp.json();var evts=b.data||[];
+    document.getElementById('heCount').textContent=evts.length+' 条';
+    renderHelpEvents(evts);
+  }catch(e){
+    document.getElementById('helpEventsList').innerHTML='<div class="em">加载失败: '+e.message+'</div>';
+  }
+}
+
+function renderHelpEvents(evts){
+  var c=document.getElementById('helpEventsList');
+  if(!evts.length){c.innerHTML='<div class="em">暂无求助事件</div>';return}
+  var h='';
+  evts.forEach(function(e){
+    var isTest=e.source==='test';
+    var noSr=!e.server_received_at;
+    var st=e.status||'unknown';
+    var style=HE_STYLES[st]||'background:#333;color:#ccc';
+    h+='<div style="background:#1e2128;border:1px solid #2a2d35;border-radius:8px;padding:12px;margin-bottom:10px">';
+    h+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
+    h+='<span style="font-family:monospace;font-size:12px;color:#4fc3f7">'+e.event_id+'</span>';
+    h+=isTest?'<span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#f0a500;color:#000;font-weight:700">⚠️ 模拟 TEST</span>'
+            :'<span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#22c55e;color:#fff;font-weight:700">真实按键</span>';
+    h+='<span style="font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600;'+style+'">'+(HE_LABELS[st]||st)+'</span>';
+    h+='</div>';
+    var fields=[['设备',e.device_id],['来源',e.source],['创建',e.created_at],['本地确认',e.local_ack_at],
+      ['服务端接收',e.server_received_at],['查看者回应',e.viewer_ack_at],['取消时间',e.cancelled_at]];
+    fields.forEach(function(f){
+      var v=f[1];
+      h+='<div style="display:flex;font-size:12px;padding:2px 0">';
+      h+='<span style="color:#888;width:120px">'+f[0]+'</span>';
+      h+=v?'<span style="color:#4ade80;font-family:monospace">'+v+'</span>'
+           :'<span style="color:#ef4444;font-style:italic">— 空 —</span>';
+      h+='</div>';
+    });
+    if(noSr&&st!=='cancelled'&&st!=='timeout'){
+      h+='<div style="background:#2a0000;border:1px solid #ef4444;border-radius:6px;padding:6px 10px;margin-top:6px;font-size:11px;color:#f87171">';
+      h+='⚠️ <b>未送达/仅本地确认</b> — server_received_at 为空，不得显示"对方已收到"</div>';
+    }
+    var canAck=st==='delivered';
+    var canCancel=['delivered','acknowledged','local_ack','uploading'].indexOf(st)>=0;
+    h+='<div style="display:flex;gap:8px;margin-top:8px">';
+    h+='<button onclick="heAck(\''+e.event_id+'\')" '+(canAck?'':'disabled')+' style="padding:4px 14px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;'+(canAck?'':'opacity:.4;cursor:not-allowed')+'">👋 回应</button>';
+    h+='<button onclick="heCancel(\''+e.event_id+'\')" '+(canCancel?'':'disabled')+' style="padding:4px 14px;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;'+(canCancel?'':'opacity:.4;cursor:not-allowed')+'">🚫 取消</button>';
+    h+='</div></div>';
+  });
+  c.innerHTML=h;
+}
+
+async function heAck(eid){
+  try{
+    var resp=await fetch('/api/help_events/'+eid+'/ack',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({viewer_name:'web_viewer'})});
+    var b=await resp.json();
+    if(resp.status===409){alert('🔒 409 Conflict: '+b.detail);return}
+    if(!resp.ok){alert('❌ 回应失败: '+(b.detail||resp.status));return}
+    fetchHelpEvents();
+  }catch(e){alert('❌ 请求失败: '+e.message)}
+}
+
+async function heCancel(eid){
+  try{
+    var resp=await fetch('/api/help_events/'+eid+'/cancel',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+    var b=await resp.json();
+    if(!resp.ok){alert('❌ 取消失败: '+(b.detail||resp.status));return}
+    fetchHelpEvents();
+  }catch(e){alert('❌ 请求失败: '+e.message)}
+}
+
+async function createTestEvent(){
+  _heTestCounter++;
+  var eid='SOS-test-'+_heTestCounter;
+  try{
+    var dev=document.getElementById('deviceSelect').value||'g02-s20251040108-esp32s3eye';
+    var resp=await fetch('/api/help_events',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({event_id:eid,device_id:dev,source:'test'})});
+    var b=await resp.json();
+    if(!resp.ok){alert('❌ 创建失败: '+(b.detail||resp.status));return}
+    fetchHelpEvents();
+  }catch(e){alert('❌ 请求失败: '+e.message)}
+}
+
+fetchHelpEvents();
+setInterval(fetchHelpEvents,5000);
+
+setInterval(fetchCmdHistory,5000);setInterval(syncServerTime,60000);
+
+// ========== ECharts 三轴实时折线图 ==========
+var CHART_MAX_POINTS = 100;
+var _imuChart = null;
+var _chartDataX = [], _chartDataY = [], _chartDataZ = [], _chartTimeLabels = [];
+
+function initImuChart() {
+  var dom = document.getElementById('imuChart');
+  if (!dom || typeof echarts === 'undefined') return;
+  _imuChart = echarts.init(dom, null, {renderer:'canvas'});
+  var option = {
+    backgroundColor: 'transparent',
+    grid: {left:'8%',right:'4%',top:'12%',bottom:'14%'},
+    tooltip: {trigger:'axis',backgroundColor:'#1e2128',borderColor:'#2a2d35',textStyle:{color:'#e0e0e0',fontSize:12}},
+    legend: {data:['X (g)','Y (g)','Z (g)'],textStyle:{color:'#999',fontSize:11},top:4,right:10},
+    xAxis: {type:'category',data:_chartTimeLabels,axisLabel:{color:'#666',fontSize:10,rotate:0,
+      formatter:function(v){return v}},axisLine:{lineStyle:{color:'#2a2d35'}},splitLine:{show:false}},
+    yAxis: {type:'value',name:'g',nameTextStyle:{color:'#666',fontSize:11},axisLabel:{color:'#666',fontSize:11},
+      axisLine:{lineStyle:{color:'#2a2d35'}},splitLine:{lineStyle:{color:'#1e2128'}}},
+    series: [
+      {name:'X (g)',type:'line',data:_chartDataX,smooth:true,symbol:'none',lineStyle:{width:2,color:'#42a5f5'},itemStyle:{color:'#42a5f5'}},
+      {name:'Y (g)',type:'line',data:_chartDataY,smooth:true,symbol:'none',lineStyle:{width:2,color:'#66bb6a'},itemStyle:{color:'#66bb6a'}},
+      {name:'Z (g)',type:'line',data:_chartDataZ,smooth:true,symbol:'none',lineStyle:{width:2,color:'#ffa726'},itemStyle:{color:'#ffa726'}}
+    ],
+    animation: false
+  };
+  _imuChart.setOption(option);
+  window.addEventListener('resize', function(){if(_imuChart)_imuChart.resize()});
+}
+
+function updateImuChart(ax, ay, az) {
+  if (!_imuChart) return;
+  var now = new Date();
+  var label = ('0'+now.getHours()).slice(-2)+':'+('0'+now.getMinutes()).slice(-2)+':'+('0'+now.getSeconds()).slice(-2);
+  _chartTimeLabels.push(label);
+  _chartDataX.push(parseFloat(ax.toFixed(4)));
+  _chartDataY.push(parseFloat(ay.toFixed(4)));
+  _chartDataZ.push(parseFloat(az.toFixed(4)));
+  if (_chartTimeLabels.length > CHART_MAX_POINTS) {
+    _chartTimeLabels.shift();
+    _chartDataX.shift();
+    _chartDataY.shift();
+    _chartDataZ.shift();
+  }
+  _imuChart.setOption({
+    xAxis: {data: _chartTimeLabels},
+    series: [{data: _chartDataX},{data: _chartDataY},{data: _chartDataZ}]
+  });
+}
+
+// ========== Three.js 3D 姿态展示 ==========
+var _threeScene, _threeCamera, _threeRenderer, _threeBoard;
+var _threeTargetRotX = 0, _threeTargetRotZ = 0;
+
+function initImu3D() {
+  var container = document.getElementById('imu3D');
+  if (!container || typeof THREE === 'undefined') return;
+  var w = container.clientWidth, h = container.clientHeight;
+
+  _threeScene = new THREE.Scene();
+  _threeCamera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+  _threeCamera.position.set(0, 0, 5);
+
+  _threeRenderer = new THREE.WebGLRenderer({alpha: true, antialias: true});
+  _threeRenderer.setSize(w, h);
+  _threeRenderer.setClearColor(0x000000, 0);
+  container.appendChild(_threeRenderer.domElement);
+
+  // 开发板长方体: 长2 宽1 高0.1
+  var geo = new THREE.BoxGeometry(2, 1, 0.1);
+  var mat = new THREE.MeshPhongMaterial({color: 0x1a73e8, transparent: true, opacity: 0.85, shininess: 80});
+  _threeBoard = new THREE.Mesh(geo, mat);
+  _threeScene.add(_threeBoard);
+
+  // 线框叠加
+  var wireGeo = new THREE.BoxGeometry(2, 1, 0.1);
+  var wireMat = new THREE.MeshBasicMaterial({color: 0x4fc3f7, wireframe: true, transparent: true, opacity: 0.5});
+  var wireMesh = new THREE.Mesh(wireGeo, wireMat);
+  _threeBoard.add(wireMesh);
+
+  // 坐标轴辅助线 (短小)
+  var axesHelper = new THREE.AxesHelper(0.6);
+  _threeBoard.add(axesHelper);
+
+  // 灯光
+  var ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  _threeScene.add(ambientLight);
+  var dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(3, 4, 5);
+  _threeScene.add(dirLight);
+  var dirLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+  dirLight2.position.set(-2, -1, 3);
+  _threeScene.add(dirLight2);
+
+  animateThree();
+  window.addEventListener('resize', function(){
+    if(!_threeRenderer) return;
+    var w2 = container.clientWidth, h2 = container.clientHeight;
+    _threeCamera.aspect = w2 / h2;
+    _threeCamera.updateProjectionMatrix();
+    _threeRenderer.setSize(w2, h2);
+  });
+}
+
+function updateImu3D(ax, ay, az) {
+  // Roll (绕Z轴): atan2(y, z)
+  _threeTargetRotZ = Math.atan2(ay, az);
+  // Pitch (绕X轴): atan2(-x, sqrt(y*y + z*z))
+  _threeTargetRotX = Math.atan2(-ax, Math.sqrt(ay*ay + az*az));
+}
+
+function animateThree() {
+  requestAnimationFrame(animateThree);
+  if (!_threeBoard || !_threeRenderer || !_threeScene || !_threeCamera) return;
+  // 平滑插值
+  _threeBoard.rotation.x += (_threeTargetRotX - _threeBoard.rotation.x) * 0.12;
+  _threeBoard.rotation.z += (_threeTargetRotZ - _threeBoard.rotation.z) * 0.12;
+  _threeRenderer.render(_threeScene, _threeCamera);
+}
+
+// 初始化图表和3D
+initImuChart();
+initImu3D();
 </script>
 </body>
 </html>

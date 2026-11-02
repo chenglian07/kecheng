@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Week3 求助事件预览 (Mock)</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;background:#0f1117;color:#e0e0e0;min-height:100vh;padding:20px}
+h1{text-align:center;color:#f0a500;margin-bottom:8px;font-size:22px}
+.subtitle{text-align:center;color:#888;font-size:13px;margin-bottom:20px}
+.warn-box{background:#2a1a00;border:1px solid #f0a500;border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#f0a500}
+.warn-box strong{color:#ff6b6b}
+.events-list{max-width:800px;margin:0 auto}
+.event-card{background:#181b22;border:1px solid #2a2d35;border-radius:12px;margin-bottom:16px;overflow:hidden}
+.event-card:hover{border-color:#3a3d45}
+.event-header{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #2a2d35;gap:8px;flex-wrap:wrap}
+.event-id{font-family:"SF Mono",Monaco,monospace;font-size:13px;color:#4fc3f7}
+.badge{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:700}
+.badge-sim{background:#f0a500;color:#000}
+.badge-real{background:#22c55e;color:#fff}
+.status-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:600}
+.st-local_ack{background:#3b82f620;color:#60a5fa;border:1px solid #3b82f640}
+.st-uploading{background:#8b5cf620;color:#a78bfa;border:1px solid #8b5cf640}
+.st-delivered{background:#f59e0b20;color:#fbbf24;border:1px solid #f59e0b40}
+.st-acknowledged{background:#22c55e20;color:#4ade80;border:1px solid #22c55e40}
+.st-cancelled{background:#ef444420;color:#f87171;border:1px solid #ef444440}
+.st-failed{background:#dc262620;color:#ef4444;border:1px solid #dc262640}
+.st-timeout{background:#6b728020;color:#9ca3af;border:1px solid #6b728040}
+.event-body{padding:16px}
+.field-row{display:flex;align-items:center;padding:4px 0;font-size:13px}
+.field-label{color:#888;width:180px;flex-shrink:0}
+.field-value{font-family:"SF Mono",Monaco,monospace;font-size:12px}
+.field-value.empty{color:#ef4444;font-style:italic}
+.field-value.ok{color:#4ade80}
+.delivery-warn{background:#2a0000;border:1px solid #ef4444;border-radius:6px;padding:8px 12px;margin-top:8px;font-size:12px;color:#f87171}
+.event-actions{display:flex;gap:8px;padding:12px 16px;border-top:1px solid #2a2d35}
+.btn{padding:6px 16px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-ack{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff}
+.btn-cancel{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff}
+.btn-demo{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff}
+.toast{position:fixed;top:20px;right:20px;background:#1e2128;border:1px solid #2a2d35;border-radius:8px;padding:12px 20px;font-size:13px;z-index:1000;opacity:0;transition:opacity .3s;max-width:450px}
+.toast.show{opacity:1}
+.toast.error{border-color:#ef4444;color:#f87171}
+.toast.success{border-color:#22c55e;color:#4ade80}
+.toast.warn{border-color:#f0a500;color:#fbbf24}
+</style>
+</head>
+<body>
+<h1>🆘 教学求助事件面板 <span style="font-size:14px;color:#888">(Week3 Mock 预览)</span></h1>
+<p class="subtitle">纯前端 Mock · 双击打开 · 不依赖后端</p>
+<div class="warn-box">
+  ⚠️ <strong>硬件降级说明：</strong>本次运行无物理 LED/蜂鸣器，本地反馈以串口日志为证据。
+  物理反馈闭环中"实体反馈输出"标记为 <strong>待补验</strong>。<br>
+  此页面为 Mock 预览，操作仅在前端模拟。
+</div>
+<div class="events-list" id="eventsList"></div>
+<div class="toast" id="toast"></div>
+<script>
+const E = [
+  {id:"SOS-a1b2c3d4-0001",did:"g02-s20251040108-esp32s3eye",src:"button",st:"local_ack",
+   ca:"2026-11-02T10:15:30Z",la:"2026-11-02T10:15:30Z",sr:null,va:null,ct:null},
+  {id:"SOS-a1b2c3d4-0002",did:"g02-s20251040108-esp32s3eye",src:"button",st:"uploading",
+   ca:"2026-11-02T10:16:00Z",la:"2026-11-02T10:16:00Z",sr:null,va:null,ct:null},
+  {id:"SOS-a1b2c3d4-0003",did:"g02-s20251040108-esp32s3eye",src:"button",st:"delivered",
+   ca:"2026-11-02T10:17:00Z",la:"2026-11-02T10:17:00Z",sr:"2026-11-02T10:17:02Z",va:null,ct:null},
+  {id:"SOS-a1b2c3d4-0004",did:"g02-s20251040108-esp32s3eye",src:"button",st:"acknowledged",
+   ca:"2026-11-02T10:18:00Z",la:"2026-11-02T10:18:00Z",sr:"2026-11-02T10:18:01Z",va:"2026-11-02T10:18:15Z",ct:null},
+  {id:"SOS-a1b2c3d4-0005",did:"g02-s20251040108-esp32s3eye",src:"button",st:"cancelled",
+   ca:"2026-11-02T10:19:00Z",la:"2026-11-02T10:19:00Z",sr:"2026-11-02T10:19:02Z",va:null,ct:"2026-11-02T10:19:10Z"},
+  {id:"SOS-a1b2c3d4-0006",did:"g02-s20251040108-esp32s3eye",src:"button",st:"failed",
+   ca:"2026-11-02T10:20:00Z",la:"2026-11-02T10:20:00Z",sr:null,va:null,ct:null},
+  {id:"SOS-a1b2c3d4-0007",did:"g02-s20251040108-esp32s3eye",src:"button",st:"timeout",
+   ca:"2026-11-02T10:21:00Z",la:"2026-11-02T10:21:00Z",sr:null,va:null,ct:null},
+  {id:"SOS-test-sim-0008",did:"g02-s20251040108-esp32s3eye",src:"test",st:"delivered",
+   ca:"2026-11-02T10:22:00Z",la:"2026-11-02T10:22:00Z",sr:"2026-11-02T10:22:01Z",va:null,ct:null},
+];
+const SL={local_ack:"🔵 本地已确认",uploading:"🟣 上传中",delivered:"🟡 已送达",
+  acknowledged:"🟢 已回应",cancelled:"🔴 已取消",failed:"❌ 上传失败",timeout:"⚫ 超时"};
+function toast(m,t){var d=document.getElementById('toast');d.textContent=m;d.className='toast show '+(t||'');setTimeout(()=>{d.className='toast'},4000)}
+function ft(s){if(!s)return null;try{return new Date(s).toLocaleString('zh-CN',{hour12:false})}catch(e){return s}}
+function R(){
+  var c=document.getElementById('eventsList');c.innerHTML='';
+  E.forEach((e,i)=>{
+    var test=e.src==='test',noSr=!e.sr;
+    var h='<div class="event-card"><div class="event-header">';
+    h+='<span class="event-id">'+e.id+'</span>';
+    h+=test?'<span class="badge badge-sim">⚠️ 模拟 TEST</span>':'<span class="badge badge-real">真实按键</span>';
+    h+='<span class="status-badge st-'+e.st+'">'+(SL[e.st]||e.st)+'</span></div>';
+    h+='<div class="event-body">';
+    [['设备 ID',e.did,1],['来源',e.src,1],['created_at',ft(e.ca),1],['local_ack_at',ft(e.la),1],
+     ['server_received_at',ft(e.sr),!!e.sr],['viewer_ack_at',ft(e.va),!!e.va],['cancelled_at',ft(e.ct),!!e.ct]
+    ].forEach(([l,v,ok])=>{
+      h+='<div class="field-row"><span class="field-label">'+l+'</span>';
+      h+=v?'<span class="field-value '+(ok?'ok':'')+'">'+v+'</span>':'<span class="field-value empty">— 空 —</span>';
+      h+='</div>';
+    });
+    if(noSr&&e.st!=='cancelled'&&e.st!=='timeout'){
+      h+='<div class="delivery-warn">⚠️ <b>未送达/仅本地确认</b> — server_received_at 为空，不得显示"对方已收到"</div>';
+    }
+    h+='</div>';
+    var canA=e.st==='delivered',canC=['delivered','acknowledged','local_ack','uploading'].includes(e.st);
+    h+='<div class="event-actions">';
+    h+='<button class="btn btn-ack" '+(canA?'':'disabled')+' onclick="doA('+i+')">👋 回应</button>';
+    h+='<button class="btn btn-cancel" '+(canC?'':'disabled')+' onclick="doC('+i+')">🚫 取消</button>';
+    if(e.st==='cancelled'){
+      h+='<button class="btn btn-demo" onclick="doAC('+i+')">🔒 尝试回应(演示409)</button>';
+    }
+    h+='</div></div>';
+    c.innerHTML+=h;
+  });
+}
+function doA(i){var e=E[i];if(e.st!=='delivered'){toast('❌ 无法回应: 状态='+e.st,'error');return}
+  e.st='acknowledged';e.va=new Date().toISOString();R();toast('✅ 已回应 '+e.id,'success')}
+function doC(i){var e=E[i];if(!['delivered','acknowledged','local_ack','uploading'].includes(e.st)){
+  toast('❌ 无法取消: 状态='+e.st,'error');return}
+  e.st='cancelled';e.ct=new Date().toISOString();R();toast('🚫 已取消 '+e.id,'warn')}
+function doAC(i){var e=E[i];
+  toast('🔒 409 Conflict: '+e.id+' 已取消 (cancelled_at='+ft(e.ct)+')，迟到回应被拒绝','error')}
+R();
+</script>
+</body>
+</html>

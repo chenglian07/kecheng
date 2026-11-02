@@ -64,14 +64,92 @@
         .footer { text-align: center; padding: 20px; color: #444; font-size: 12px; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
         .loading { animation: pulse 1.5s infinite; }
+        /* ========== 第二周：控制面板 ========== */
+        .control-bar { background: linear-gradient(135deg,#1a2a3a,#1e3450); border-bottom: 1px solid #2a4a6a; padding: 15px 30px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+        .btn-collect { background: linear-gradient(135deg, #27ae60, #2ecc71); color: #fff; border: none; padding: 10px 22px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s; box-shadow: 0 2px 8px rgba(46,204,113,0.3); }
+        .btn-collect:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(46,204,113,0.5); }
+        .btn-collect:disabled { background: #555; cursor: not-allowed; box-shadow: none; transform: none; }
+        .btn-periodic { background: #2a4a6a; color: #fff; border: 1px solid #3498db; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.2s; }
+        .btn-periodic:hover { background: #3498db; }
+        .btn-periodic.paused { background: #e74c3c; border-color: #e74c3c; }
+        .btn-periodic.paused:hover { background: #c0392b; }
+        .periodic-indicator { font-size: 12px; color: #888; display: flex; align-items: center; gap: 4px; }
+        .periodic-indicator .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+        .periodic-indicator .dot.on { background: #2ecc71; box-shadow: 0 0 4px #2ecc71; }
+        .periodic-indicator .dot.off { background: #e74c3c; }
+        /* 任务状态面板 */
+        .task-panel { max-width: 1200px; margin: 0 auto; padding: 0 20px; display: none; }
+        .task-panel.show { display: block; }
+        .task-panel-inner { background: linear-gradient(135deg,#1a2a3a,#1e3450); border: 1px solid #2a4a6a; border-radius: 12px; padding: 20px 25px; margin-top: 15px; }
+        .task-panel-inner h3 { font-size: 14px; color: #3498db; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .task-status-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+        .task-step { padding: 5px 14px; border-radius: 16px; font-size: 12px; background: rgba(255,255,255,0.05); color: #555; border: 1px solid #333; transition: all 0.3s; }
+        .task-step.active { background: rgba(52,152,219,0.2); color: #3498db; border-color: #3498db; animation: pulse 1.5s infinite; }
+        .task-step.done { background: rgba(46,204,113,0.15); color: #2ecc71; border-color: #2ecc71; animation: none; }
+        .task-step.error { background: rgba(231,76,60,0.15); color: #e74c3c; border-color: #e74c3c; animation: none; }
+        .task-arrow { color: #444; font-size: 16px; }
+        .task-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+        .task-rid { font-size: 11px; color: #555; font-family: Consolas,monospace; word-break: break-all; }
+        .task-timer { font-size: 12px; color: #888; }
+        .timeout-banner { background: rgba(231,76,60,0.15); border: 1px solid #e74c3c; border-radius: 8px; padding: 12px 18px; margin-top: 10px; font-size: 13px; color: #e74c3c; display: none; align-items: center; gap: 8px; }
+        .timeout-banner.show { display: flex; }
+        /* 新采集数据高亮卡片 */
+        .new-collect-card { background: linear-gradient(135deg,#0d3320,#1a4a2e); border: 2px solid #2ecc71; border-radius: 12px; padding: 22px 25px; margin-bottom: 15px; position: relative; box-shadow: 0 0 20px rgba(46,204,113,0.15); display: none; }
+        .new-collect-card.show { display: block; animation: glowIn 0.6s ease; }
+        .new-collect-card .badge { position: absolute; top: -10px; left: 20px; background: #2ecc71; color: #000; font-size: 11px; font-weight: bold; padding: 3px 12px; border-radius: 10px; }
+        .new-collect-card h3 { font-size: 15px; color: #2ecc71; margin-bottom: 15px; }
+        .nc-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 12px; }
+        .nc-item { background: rgba(0,0,0,0.35); border-radius: 8px; padding: 12px; text-align: center; }
+        .nc-label { font-size: 11px; color: #6c6; text-transform: uppercase; margin-bottom: 4px; }
+        .nc-value { font-size: 20px; font-weight: bold; color: #fff; font-family: Consolas,monospace; }
+        .nc-value.x { color: #e74c3c; } .nc-value.y { color: #2ecc71; } .nc-value.z { color: #3498db; }
+        .nc-unit { font-size: 11px; color: #666; margin-left: 2px; }
+        .nc-rid { font-size: 10px; color: #4a7; font-family: Consolas,monospace; margin-top: 10px; text-align: right; }
+        @keyframes glowIn { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
     </style>
 </head>
 <body>
 <div class="header">
-    <h1>📡 IMU 数据监控面板 <span>ESP32-S3-EYE × QMA7981 | Week 1</span></h1>
+    <h1>📡 IMU 数据监控面板 <span>ESP32-S3-EYE × QMA7981 | Week 2 远程指令</span></h1>
     <div class="status-bar">
         <span id="connStatus"><span class="status-dot offline"></span> 未连接</span>
         <span id="lastRefresh" style="color:#666">--</span>
+    </div>
+</div>
+
+<!-- 第二周：控制面板 -->
+<div class="control-bar">
+    <button class="btn-collect" id="btnCollect" onclick="collectOnce()">📡 采集一次最新数据</button>
+    <button class="btn-periodic" id="btnPeriodic" onclick="togglePeriodic()">⏸ 暂停周期上报</button>
+    <span class="periodic-indicator" id="periodicIndicator"><span class="dot on"></span> 周期上报：开启</span>
+</div>
+
+<!-- 第二周：任务状态面板 -->
+<div class="task-panel" id="taskPanel">
+    <div class="task-panel-inner">
+        <h3>📋 采集任务追踪</h3>
+        <div class="task-status-flow" id="taskFlow">
+            <span class="task-step" id="step-submitted">⏳ 已提交</span>
+            <span class="task-arrow">→</span>
+            <span class="task-step" id="step-received">📡 设备接收中</span>
+            <span class="task-arrow">→</span>
+            <span class="task-step" id="step-completed">✅ 采集完成</span>
+        </div>
+        <div class="task-meta">
+            <span class="task-rid" id="taskRid"></span>
+            <span class="task-timer" id="taskTimer"></span>
+        </div>
+        <div class="timeout-banner" id="taskTimeout">⏰ <span id="timeoutMsg">设备无响应，采集超时！请检查 ESP32 是否在线。</span></div>
+    </div>
+</div>
+
+<!-- 第二周：新采集数据高亮卡片 -->
+<div class="container" style="margin-bottom:0;padding-bottom:0">
+    <div class="new-collect-card" id="newCollectCard">
+        <span class="badge">✅ 本次新采集数据</span>
+        <h3 id="ncTitle">🎉 远程采集成功 — 以下为设备本次新采集的数据</h3>
+        <div class="nc-grid" id="ncGrid"></div>
+        <div class="nc-rid" id="ncRid"></div>
     </div>
 </div>
 <div class="container">
@@ -314,6 +392,157 @@ function showNoData() {
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 setInterval(checkStale, 5000);
+
+// ============ 第二周：远程采集指令 ============
+
+const DEVICE_ID = 'my-esp32';
+const TASK_POLL_INTERVAL = 300;
+const TASK_TIMEOUT_SEC = 15;
+
+let currentTaskId = null;
+let taskPollTimer = null;
+let taskStartTime = null;
+let periodicOn = true;
+
+async function collectOnce() {
+    const btn = document.getElementById('btnCollect');
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在下发指令...';
+    document.getElementById('newCollectCard').classList.remove('show');
+    document.getElementById('taskTimeout').classList.remove('show');
+
+    try {
+        const resp = await fetch('/api/tasks/collect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: DEVICE_ID })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || '创建任务失败');
+
+        currentTaskId = data.request_id;
+        taskStartTime = Date.now();
+        document.getElementById('taskPanel').classList.add('show');
+        ['step-submitted','step-received','step-completed'].forEach(id => {
+            document.getElementById(id).className = 'task-step';
+        });
+        updateTaskSteps('submitted');
+        document.getElementById('taskRid').textContent = 'request_id: ' + currentTaskId;
+        btn.textContent = '⏳ 等待设备响应...';
+
+        if (taskPollTimer) clearInterval(taskPollTimer);
+        taskPollTimer = setInterval(pollTaskStatus, TASK_POLL_INTERVAL);
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '📡 采集一次最新数据';
+        showError('下发指令失败: ' + e.message);
+    }
+}
+
+function updateTaskSteps(currentStatus) {
+    const steps = ['submitted', 'received', 'completed'];
+    const idx = steps.indexOf(currentStatus);
+    steps.forEach((s, i) => {
+        const el = document.getElementById('step-' + s);
+        el.className = 'task-step';
+        if (i < idx) el.classList.add('done');
+        else if (i === idx) el.classList.add('active');
+    });
+}
+
+async function pollTaskStatus() {
+    if (!currentTaskId) { clearInterval(taskPollTimer); return; }
+    const elapsed = (Date.now() - taskStartTime) / 1000;
+    document.getElementById('taskTimer').textContent = '⏱ ' + elapsed.toFixed(1) + 's';
+
+    if (elapsed > TASK_TIMEOUT_SEC) {
+        clearInterval(taskPollTimer);
+        document.getElementById('btnCollect').disabled = false;
+        document.getElementById('btnCollect').textContent = '📡 采集一次最新数据';
+        ['step-submitted','step-received','step-completed'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el.classList.contains('active')) {
+                el.classList.remove('active');
+                el.classList.add('error');
+                el.textContent = '❌ ' + el.textContent.replace(/^[^\s]+ /, '') + ' (超时)';
+            }
+        });
+        document.getElementById('taskTimeout').classList.add('show');
+        document.getElementById('timeoutMsg').textContent = '设备 ' + TASK_TIMEOUT_SEC + ' 秒内无响应！请检查 ESP32 是否在线。';
+        return;
+    }
+
+    try {
+        const resp = await fetch('/api/tasks/' + currentTaskId);
+        if (!resp.ok) { clearInterval(taskPollTimer); return; }
+        const data = await resp.json();
+        updateTaskSteps(data.status);
+
+        if (data.status === 'completed') {
+            clearInterval(taskPollTimer);
+            document.getElementById('btnCollect').disabled = false;
+            document.getElementById('btnCollect').textContent = '📡 采集一次最新数据';
+            if (data.imu_data) renderNewCollect(data.imu_data, currentTaskId, data.completed_at);
+        } else if (data.status === 'failed' || data.status === 'timeout') {
+            clearInterval(taskPollTimer);
+            document.getElementById('btnCollect').disabled = false;
+            document.getElementById('btnCollect').textContent = '📡 采集一次最新数据';
+            document.getElementById('step-completed').className = 'task-step error';
+            document.getElementById('step-completed').textContent = data.status === 'failed' ? '❌ 采集失败' : '❌ 超时';
+            document.getElementById('taskTimeout').classList.add('show');
+            document.getElementById('timeoutMsg').textContent = (data.status === 'failed' ? '设备采集失败: ' : '后端超时: ') + (data.error_message || '未知');
+        }
+    } catch (e) { /* 网络错误不中断轮询 */ }
+}
+
+function renderNewCollect(imu, rid, completedAt) {
+    const card = document.getElementById('newCollectCard');
+    const grid = document.getElementById('ncGrid');
+    grid.innerHTML =
+        '<div class="nc-item"><div class="nc-label">X 轴加速度</div><div class="nc-value x">' + imu.ax_mg.toFixed(1) + '<span class="nc-unit">mg</span></div></div>' +
+        '<div class="nc-item"><div class="nc-label">Y 轴加速度</div><div class="nc-value y">' + imu.ay_mg.toFixed(1) + '<span class="nc-unit">mg</span></div></div>' +
+        '<div class="nc-item"><div class="nc-label">Z 轴加速度</div><div class="nc-value z">' + imu.az_mg.toFixed(1) + '<span class="nc-unit">mg</span></div></div>' +
+        '<div class="nc-item"><div class="nc-label">原始值 X</div><div class="nc-value">' + imu.raw_x + '</div></div>' +
+        '<div class="nc-item"><div class="nc-label">原始值 Y</div><div class="nc-value">' + imu.raw_y + '</div></div>' +
+        '<div class="nc-item"><div class="nc-label">原始值 Z</div><div class="nc-value">' + imu.raw_z + '</div></div>' +
+        '<div class="nc-item"><div class="nc-label">Chip ID</div><div class="nc-value">0x' + imu.chip_id.toString(16).toUpperCase() + '</div></div>' +
+        '<div class="nc-item"><div class="nc-label">采集时间</div><div class="nc-value" style="font-size:13px">' + (completedAt || '--') + '</div></div>';
+    document.getElementById('ncRid').textContent = 'request_id: ' + rid;
+    card.classList.add('show');
+}
+
+async function togglePeriodic() {
+    const btn = document.getElementById('btnPeriodic');
+    const action = periodicOn ? 'pause' : 'resume';
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/tasks/periodic', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: DEVICE_ID, action: action })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || '操作失败');
+        periodicOn = data.periodic_report;
+        updatePeriodicUI();
+    } catch (e) {
+        showError('周期上报控制失败: ' + e.message);
+    } finally { btn.disabled = false; }
+}
+
+function updatePeriodicUI() {
+    const btn = document.getElementById('btnPeriodic');
+    const ind = document.getElementById('periodicIndicator');
+    if (periodicOn) {
+        btn.textContent = '⏸ 暂停周期上报';
+        btn.classList.remove('paused');
+        ind.innerHTML = '<span class="dot on"></span> 周期上报：开启';
+    } else {
+        btn.textContent = '▶ 恢复周期上报';
+        btn.classList.add('paused');
+        ind.innerHTML = '<span class="dot off"></span> 周期上报：已暂停';
+    }
+}
 </script>
 </body>
 </html>

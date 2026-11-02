@@ -1,18 +1,18 @@
 /*
- * main.c - 第1周：ESP32-S3-EYE + QMA7981 IMU 采集 → WiFi → HTTP 上传
+ * main.c - 第2周：ESP32-S3-EYE + QMA7981 IMU 采集 → WiFi → HTTP 上传 + 远程指令
+ *
+ * 第2周新增功能：
+ *   - 双 Task 架构：upload_task（周期上报） + cmd_poll_task（指令拉取）
+ *   - 事件组控制周期上报暂停/恢复
+ *   - 远程采集指令接收、执行、结果回传
  *
  * 工作流程：
  *   1. 初始化 I2C，读取 QMA7981 加速度计
  *   2. 连接 WiFi
- *   3. 同步 SNTP 时间（获取真实时间戳）
- *   4. 周期采集 IMU 数据 → POST 到 VPS 后端
- *
- * Kconfig 配置项（在 menuconfig 或 sdkconfig.defaults 中设置）：
- *   CONFIG_ESP_WIFI_SSID      - WiFi 名称
- *   CONFIG_ESP_WIFI_PASSWORD   - WiFi 密码
- *   CONFIG_SERVER_URL          - VPS 后端 URL，如 http://1.2.3.4:8000
- *   CONFIG_DEVICE_ID           - 本组设备 ID，如 group_01
- *   CONFIG_UPLOAD_INTERVAL_MS  - 上传周期（毫秒），默认 5000
+ *   3. 同步 SNTP 时间
+ *   4. 初始化 3 个 HTTP 客户端
+ *   5. 启动 upload_task（周期采集上传，可暂停）
+ *   6. 启动 cmd_poll_task（每 500ms 拉取指令，永不停止）
  */
 
 #include <stdio.h>
@@ -22,6 +22,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_sntp.h"
@@ -32,6 +33,14 @@
 #include "http_upload.h"
 
 static const char *TAG = "MAIN";
+
+/* ---- 事件组：控制周期上报 ---- */
+#define PERIODIC_REPORT_BIT  BIT0
+
+static EventGroupHandle_t s_event_group = NULL;
+
+/* ---- 指令拉取间隔 ---- */
+#define CMD_POLL_INTERVAL_MS  500
 
 /* ---- SNTP 时间同步 ---- */
 
@@ -74,28 +83,144 @@ static int64_t get_timestamp(void)
     return (int64_t)tv.tv_sec;
 }
 
-/* ---- Kconfig 选项声明（让 menuconfig 可见） ---- */
+/* ---- 第2周：周期上传 Task（可通过事件组暂停/恢复） ---- */
 
-/* 在 sdkconfig.defaults 中已定义以下宏：
- *   CONFIG_ESP_WIFI_SSID
- *   CONFIG_ESP_WIFI_PASSWORD
- *   CONFIG_SERVER_URL
- *   CONFIG_DEVICE_ID
- *   CONFIG_UPLOAD_INTERVAL_MS
- */
+static void upload_task(void *pvParameters)
+{
+    static const char *T = "UPLOAD";
+    int upload_count = 0;
+    int upload_fail_count = 0;
+
+    ESP_LOGI(T, "upload_task 启动（周期 %d ms）", CONFIG_UPLOAD_INTERVAL_MS);
+
+    while (1) {
+        /* 检查事件组：PERIODIC_REPORT_BIT 置位 = 允许上报 */
+        EventBits_t bits = xEventGroupGetBits(s_event_group);
+        if (!(bits & PERIODIC_REPORT_BIT)) {
+            /* 周期上报已暂停，静默等待 */
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
+            continue;
+        }
+
+        /* 采集 IMU 数据 */
+        qma7981_data_t imu_data;
+        esp_err_t ret = qma7981_read(&imu_data);
+        if (ret != ESP_OK) {
+            ESP_LOGE(T, "❌ 传感器读取失败");
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
+            continue;
+        }
+
+        int64_t ts = get_timestamp();
+
+        ESP_LOGD(T, "[#%d] raw=%d/%d/%d | mg=%.1f/%.1f/%.1f | ts=%lld",
+                 upload_count, imu_data.raw_x, imu_data.raw_y, imu_data.raw_z,
+                 imu_data.ax_mg, imu_data.ay_mg, imu_data.az_mg, (long long)ts);
+
+        if (!wifi_manager_is_connected()) {
+            ESP_LOGW(T, "⚠️ WiFi 未连接，等待重连...");
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
+            continue;
+        }
+
+        ret = http_upload_imu_data(CONFIG_DEVICE_ID, &imu_data, ts);
+        if (ret == ESP_OK) {
+            upload_count++;
+            if (upload_count % 10 == 0) {
+                ESP_LOGI(T, "✅ 已上传 %d 条数据", upload_count);
+            }
+        } else {
+            upload_fail_count++;
+            ESP_LOGW(T, "⚠️ 上传失败 (累计 %d 次)", upload_fail_count);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
+    }
+}
+
+/* ---- 第2周：指令拉取 Task（每 500ms 轮询，永不停止） ---- */
+
+static void cmd_poll_task(void *pvParameters)
+{
+    static const char *T = "CMD_POLL";
+    char request_id[48];
+    bool periodic_report = true;
+
+    ESP_LOGI(T, "cmd_poll_task 启动（每 %d ms 轮询）", CMD_POLL_INTERVAL_MS);
+
+    while (1) {
+        if (!wifi_manager_is_connected()) {
+            vTaskDelay(pdMS_TO_TICKS(CMD_POLL_INTERVAL_MS));
+            continue;
+        }
+
+        esp_err_t err = http_poll_pending_task(
+            request_id, sizeof(request_id), &periodic_report);
+
+        if (err == ESP_OK) {
+            /* ===== 拉取到新指令 ===== */
+            ESP_LOGI(T, "📩 拉取到指令: %.12s..., periodic=%s",
+                     request_id, periodic_report ? "true" : "false");
+
+            /* 更新周期上报状态 */
+            if (periodic_report) {
+                xEventGroupSetBits(s_event_group, PERIODIC_REPORT_BIT);
+            } else {
+                xEventGroupClearBits(s_event_group, PERIODIC_REPORT_BIT);
+                ESP_LOGI(T, "📢 后端要求: 暂停周期上报");
+            }
+
+            /* 执行一次采集 */
+            qma7981_data_t imu_data;
+            esp_err_t read_ret = qma7981_read(&imu_data);
+            int64_t ts = get_timestamp();
+
+            if (read_ret == ESP_OK) {
+                ESP_LOGI(T, "🔬 单采完成: raw=%d/%d/%d | mg=%.1f/%.1f/%.1f",
+                         imu_data.raw_x, imu_data.raw_y, imu_data.raw_z,
+                         imu_data.ax_mg, imu_data.ay_mg, imu_data.az_mg);
+                err = http_report_complete(request_id, &imu_data, ts);
+                if (err == ESP_OK) {
+                    ESP_LOGI(T, "✅ 结果已回传 (%.12s...)", request_id);
+                } else {
+                    ESP_LOGE(T, "❌ 回传失败: %s", esp_err_to_name(err));
+                }
+            } else {
+                ESP_LOGE(T, "❌ 传感器读取失败");
+                http_report_fail(request_id, "sensor_read_failed");
+            }
+        } else if (err == ESP_ERR_NOT_FOUND) {
+            /* 无新任务，但更新 periodic 状态 */
+            if (periodic_report) {
+                xEventGroupSetBits(s_event_group, PERIODIC_REPORT_BIT);
+            } else {
+                xEventGroupClearBits(s_event_group, PERIODIC_REPORT_BIT);
+            }
+        } else {
+            ESP_LOGD(T, "拉取异常: %s", esp_err_to_name(err));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(CMD_POLL_INTERVAL_MS));
+    }
+}
 
 /* ---- 主程序 ---- */
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  第1周 IMU 采集系统启动");
+    ESP_LOGI(TAG, "  第2周 IMU 采集+远程指令系统启动");
     ESP_LOGI(TAG, "  设备ID: %s", CONFIG_DEVICE_ID);
     ESP_LOGI(TAG, "  目标服务器: %s", CONFIG_SERVER_URL);
     ESP_LOGI(TAG, "  上传周期: %d ms", CONFIG_UPLOAD_INTERVAL_MS);
+    ESP_LOGI(TAG, "  指令轮询: %d ms", CMD_POLL_INTERVAL_MS);
     ESP_LOGI(TAG, "========================================");
 
-    /* 1. 初始化 NVS（WiFi 需要） */
+    /* 0. 创建事件组，初始默认允许周期上报 */
+    s_event_group = xEventGroupCreate();
+    xEventGroupSetBits(s_event_group, PERIODIC_REPORT_BIT);
+
+    /* 1. 初始化 NVS */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -103,13 +228,12 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    /* 2. 初始化 QMA7981 加速度计 */
+    /* 2. 初始化 QMA7981 */
     ESP_LOGI(TAG, ">>> 初始化 QMA7981 传感器...");
     ret = qma7981_init(QMA7981_RANGE_8G);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "❌ QMA7981 初始化失败！请检查接线：SDA=GPIO%d, SCL=GPIO%d, 地址=0x%02X",
-                 QMA7981_I2C_SDA_GPIO, QMA7981_I2C_SCL_GPIO, QMA7981_I2C_ADDR);
-        /* 不停止程序，进入调试循环 */
+        ESP_LOGE(TAG, "❌ QMA7981 初始化失败！SDA=GPIO%d, SCL=GPIO%d",
+                 QMA7981_I2C_SDA_GPIO, QMA7981_I2C_SCL_GPIO);
         while (1) {
             ESP_LOGE(TAG, "传感器未就绪，等待修复...");
             vTaskDelay(pdMS_TO_TICKS(5000));
@@ -117,17 +241,17 @@ void app_main(void)
     }
 
     if (!qma7981_is_active()) {
-        ESP_LOGE(TAG, "❌ 传感器未能激活，请检查硬件连接");
-        ESP_LOGW(TAG, "   系统将继续运行并上传零值数据");
+        ESP_LOGE(TAG, "❌ 传感器未能激活");
+        ESP_LOGW(TAG, "   系统将上传零值数据");
     } else {
-        ESP_LOGI(TAG, "✅ QMA7981 传感器正常工作中");
+        ESP_LOGI(TAG, "✅ QMA7981 传感器正常");
     }
 
-    /* 测试读取一次 */
+    /* 测试读取 */
     qma7981_data_t test_data;
     ret = qma7981_read(&test_data);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "✅ 测试读取成功: raw_x=%d, raw_y=%d, raw_z=%d | ax=%.1f mg, ay=%.1f mg, az=%.1f mg",
+        ESP_LOGI(TAG, "✅ 测试读取: raw=%d/%d/%d | mg=%.1f/%.1f/%.1f",
                  test_data.raw_x, test_data.raw_y, test_data.raw_z,
                  test_data.ax_mg, test_data.ay_mg, test_data.az_mg);
     }
@@ -136,10 +260,9 @@ void app_main(void)
     ESP_LOGI(TAG, ">>> 连接 WiFi...");
     ret = wifi_manager_init();
     ESP_ERROR_CHECK(ret);
-
-    ret = wifi_manager_wait_connect(30000);  /* 30秒超时 */
+    ret = wifi_manager_wait_connect(30000);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "❌ WiFi 连接失败！请检查 SSID 和密码。将重启重试...");
+        ESP_LOGE(TAG, "❌ WiFi 连接失败！重启重试...");
         esp_restart();
     }
     ESP_LOGI(TAG, "✅ WiFi 已连接，IP: %s", wifi_manager_get_ip());
@@ -147,58 +270,19 @@ void app_main(void)
     /* 4. 同步时间 */
     init_sntp();
 
-    /* 5. 初始化 HTTP 上传 */
-    ESP_LOGI(TAG, ">>> 初始化 HTTP 上传...");
+    /* 5. 初始化 3 个 HTTP 客户端 */
+    ESP_LOGI(TAG, ">>> 初始化 HTTP 客户端...");
     ret = http_upload_init();
     ESP_ERROR_CHECK(ret);
 
-    /* 6. 主循环：周期采集 + 上传 */
+    /* 6. 启动双 Task */
     ESP_LOGI(TAG, "========================================");
-    ESP_LOGI(TAG, "  🚀 开始周期采集上传（每 %d ms）", CONFIG_UPLOAD_INTERVAL_MS);
+    ESP_LOGI(TAG, "  🚀 upload_task  (周期 %d ms, 可暂停)", CONFIG_UPLOAD_INTERVAL_MS);
+    ESP_LOGI(TAG, "  🚀 cmd_poll_task (轮询 %d ms, 永不停止)", CMD_POLL_INTERVAL_MS);
     ESP_LOGI(TAG, "========================================");
 
-    int upload_count = 0;
-    int upload_fail_count = 0;
+    xTaskCreate(upload_task,  "upload_task",  4096, NULL, 5, NULL);
+    xTaskCreate(cmd_poll_task, "cmd_poll_task", 6144, NULL, 5, NULL);
 
-    while (1) {
-        /* 采集 IMU 数据 */
-        qma7981_data_t imu_data;
-        ret = qma7981_read(&imu_data);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "❌ 传感器读取失败");
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
-            continue;
-        }
-
-        /* 获取时间戳 */
-        int64_t ts = get_timestamp();
-
-        /* 板端打印原始值（DEBUG 级别减少串口开销） */
-        ESP_LOGD(TAG, "[#%d] raw_x=%d, raw_y=%d, raw_z=%d | ax=%.1f mg, ay=%.1f mg, az=%.1f mg | ts=%lld",
-                 upload_count,
-                 imu_data.raw_x, imu_data.raw_y, imu_data.raw_z,
-                 imu_data.ax_mg, imu_data.ay_mg, imu_data.az_mg,
-                 (long long)ts);
-
-        /* 检查 WiFi 连接 */
-        if (!wifi_manager_is_connected()) {
-            ESP_LOGW(TAG, "⚠️ WiFi 未连接，等待重连...");
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
-            continue;
-        }
-
-        /* 上传到 VPS */
-        ret = http_upload_imu_data(CONFIG_DEVICE_ID, &imu_data, ts);
-        if (ret == ESP_OK) {
-            upload_count++;
-            if (upload_count % 10 == 0) {
-                ESP_LOGI(TAG, "✅ 已上传 %d 条数据", upload_count);
-            }
-        } else {
-            upload_fail_count++;
-            ESP_LOGW(TAG, "⚠️ 上传失败 (累计失败 %d 次)", upload_fail_count);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_UPLOAD_INTERVAL_MS));
-    }
+    /* app_main 返回后 FreeRTOS 调度器接管 */
 }

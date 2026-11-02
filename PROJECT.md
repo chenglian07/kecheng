@@ -12,6 +12,9 @@ zhou/
 │   │   ├── http_post.c/h       # HTTP POST 上传
 │   │   ├── http_get.c/h        # HTTP GET 请求
 │   │   ├── cmd_poll.c/h        # 远程命令轮询
+│   │   ├── sos_button.c/h      # [W3] SOS 按键检测
+│   │   ├── sos_feedback.c/h    # [W3] LED/蜂鸣器反馈
+│   │   ├── sos_event.c/h       # [W3] 求助事件状态机
 │   │   ├── secrets_template.h  # 配置模板
 │   │   └── CMakeLists.txt
 │   ├── CMakeLists.txt
@@ -21,7 +24,12 @@ zhou/
 │   ├── database.py             # SQLite 数据库管理
 │   ├── requirements.txt        # Python 依赖
 │   └── static/
-│       └── index.html          # Web 前端页面
+│       ├── index.html          # Web 前端页面
+│       ├── dashboard.html      # 实时波形示波器
+│       └── preview_help_events.html  # [W3] 求助事件预览(Mock)
+├── docs/
+│   ├── 硬件约束.md             # 硬件引脚与配置
+│   └── week3_task.md           # [W3] 第3周任务说明
 └── PROJECT.md                   # 本文件
 ```
 

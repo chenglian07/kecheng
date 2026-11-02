@@ -70,6 +70,32 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_cmd_request_id
         ON commands(request_id)
     """)
+
+    # Week 3: 求助事件表
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS help_events (
+            event_id            TEXT PRIMARY KEY,
+            device_id           TEXT NOT NULL,
+            source              TEXT NOT NULL DEFAULT 'button',
+            status              TEXT NOT NULL DEFAULT 'local_ack',
+            created_at          TEXT NOT NULL,
+            local_ack_at        TEXT NOT NULL,
+            server_received_at  TEXT,
+            viewer_ack_at       TEXT,
+            cancelled_at        TEXT,
+            evidence            TEXT,
+            ts_expire           REAL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_he_device_status
+        ON help_events(device_id, status)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_he_event_id
+        ON help_events(event_id)
+    """)
+
     conn.commit()
     conn.close()
 
@@ -292,3 +318,137 @@ def query_recent_commands(device_id: str | None = None, limit: int = 20) -> list
         ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ========== Week 3: 求助事件 CRUD ==========
+
+def insert_help_event(
+    event_id: str,
+    device_id: str,
+    source: str = "button",
+) -> dict:
+    """插入一条求助事件，返回完整记录"""
+    conn = get_connection()
+    now = datetime.now(timezone.utc).isoformat()
+    from time import time
+    ts_expire = time() + 120  # 120 秒超时
+
+    conn.execute(
+        """INSERT INTO help_events
+           (event_id, device_id, source, status, created_at, local_ack_at,
+            server_received_at, ts_expire)
+           VALUES (?, ?, ?, 'delivered', ?, ?, ?, ?)""",
+        (event_id, device_id, source, now, now, now, ts_expire),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM help_events WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def get_help_event(event_id: str) -> dict | None:
+    """查询单条求助事件"""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM help_events WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_help_event_status(
+    event_id: str,
+    status: str,
+    viewer_ack_at: str | None = None,
+    cancelled_at: str | None = None,
+) -> dict | None:
+    """更新求助事件状态"""
+    conn = get_connection()
+    now = datetime.now(timezone.utc).isoformat()
+
+    if status == "acknowledged":
+        conn.execute(
+            "UPDATE help_events SET status = ?, viewer_ack_at = ? WHERE event_id = ?",
+            (status, viewer_ack_at or now, event_id),
+        )
+    elif status == "cancelled":
+        conn.execute(
+            "UPDATE help_events SET status = ?, cancelled_at = ? WHERE event_id = ?",
+            (status, cancelled_at or now, event_id),
+        )
+    elif status == "timeout":
+        conn.execute(
+            "UPDATE help_events SET status = ? WHERE event_id = ?",
+            (status, event_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE help_events SET status = ? WHERE event_id = ?",
+            (status, event_id),
+        )
+
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM help_events WHERE event_id = ?", (event_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def query_help_events(
+    device_id: str | None = None,
+    status: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """查询求助事件列表"""
+    conn = get_connection()
+    if device_id and status:
+        rows = conn.execute(
+            """SELECT * FROM help_events
+               WHERE device_id = ? AND status = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (device_id, status, limit),
+        ).fetchall()
+    elif device_id:
+        rows = conn.execute(
+            """SELECT * FROM help_events
+               WHERE device_id = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (device_id, limit),
+        ).fetchall()
+    elif status:
+        rows = conn.execute(
+            """SELECT * FROM help_events
+               WHERE status = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM help_events
+               ORDER BY created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def expire_help_events(max_age_sec: int = 120):
+    """将超时的求助事件标记为 timeout
+
+    条件：server_received_at 为空 且 created_at 超过 max_age_sec
+    """
+    from time import time
+    conn = get_connection()
+    # 使用 ts_expire 字段判断超时
+    now = time()
+    conn.execute(
+        """UPDATE help_events SET status = 'timeout'
+           WHERE status IN ('local_ack', 'uploading')
+             AND ts_expire IS NOT NULL AND ts_expire < ?""",
+        (now,),
+    )
+    conn.commit()
+    conn.close()

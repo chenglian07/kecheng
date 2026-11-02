@@ -1,5 +1,4 @@
-# FastAPI 后端依赖
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.2
-aiosqlite==0.19.0
+# FastAPI 后端依赖（第2周已验证）
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0

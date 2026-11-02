@@ -32,6 +32,9 @@ from database import (
     query_help_events, expire_help_events,
 )
 
+# Week 4: LLM Agent
+from llm_agent import chat as llm_chat
+
 app = FastAPI(title="KECHENG Sensor API", version="0.2.0")
 
 # Web 静态文件
@@ -83,6 +86,11 @@ class AckHelpEventPayload(BaseModel):
 
 class CancelHelpEventPayload(BaseModel):
     reason: str | None = None
+
+
+# Week 4: 自然语言聊天
+class ChatPayload(BaseModel):
+    message: str
 
 
 # ---------- Lifecycle ----------
@@ -406,6 +414,37 @@ def poll_help_event_response(device_id: str):
                 "cancelled_at": evt.get("cancelled_at"),
             })
     return {"code": 0, "data": pending, "server_time": time()}
+
+
+# ---------- Week 4: 自然语言聊天 API ----------
+
+@app.post("/api/chat")
+def api_chat(payload: ChatPayload):
+    """
+    自然语言交互接口
+
+    接收用户消息，调用大模型 + Function Calling 处理，返回结构化回复。
+
+    curl 测试:
+    curl -X POST http://localhost:8000/api/chat \
+      -H "Content-Type: application/json" \
+      -d '{"message": "现在的数据是多少？"}'
+    """
+    try:
+        result = llm_chat(payload.message)
+        return {
+            "code": 0,
+            "reply": result["reply"],
+            "tool_used": result["tool_used"],
+            "data": result["data"],
+            "server_time": time(),
+        }
+    except RuntimeError as e:
+        # 环境变量未配置等运行时错误
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # 大模型 API 调用失败等
+        raise HTTPException(status_code=502, detail=f"LLM 调用失败: {e}")
 
 
 # ---------- Web ----------

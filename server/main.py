@@ -18,7 +18,7 @@ from time import time
 # 确保可以 import database.py
 sys.path.insert(0, os.path.dirname(__file__))
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -91,6 +91,7 @@ class CancelHelpEventPayload(BaseModel):
 # Week 4: 自然语言聊天
 class ChatPayload(BaseModel):
     message: str
+    session_id: str | None = None  # Week 6: 多轮会话支持
 
 
 # ---------- Lifecycle ----------
@@ -416,27 +417,61 @@ def poll_help_event_response(device_id: str):
     return {"code": 0, "data": pending, "server_time": time()}
 
 
-# ---------- Week 4: 自然语言聊天 API ----------
+# ---------- Week 4/6: 自然语言聊天 API ----------
+
+# Week 6: 内存会话管理（每个 session_id 保留最近 5 轮对话）
+import uuid
+
+_CHAT_SESSIONS: dict[str, list] = {}   # session_id → [{"role", "content"}, ...]
+_MAX_HISTORY_ROUNDS = 5                 # 保留最近 5 轮（10 条消息：5 user + 5 assistant）
+
 
 @app.post("/api/chat")
 def api_chat(payload: ChatPayload):
     """
-    自然语言交互接口
+    自然语言交互接口（Week 4 基础 + Week 6 多轮会话）
 
     接收用户消息，调用大模型 + Function Calling 处理，返回结构化回复。
+    支持 session_id 多轮对话上下文，服务端保留最近 5 轮历史。
+
+    请求体: {"message": "...", "session_id": "可选，不传则自动生成"}
+
+    返回: {"code":0, "reply":"...", "tool_used":"...", "data":{...},
+           "request_id":"uuid", "session_id":"..."}
 
     curl 测试:
     curl -X POST http://localhost:8000/api/chat \
       -H "Content-Type: application/json" \
       -d '{"message": "现在的数据是多少？"}'
     """
+    # Week 6: session 管理
+    session_id = payload.session_id or str(uuid.uuid4())
+    history = _CHAT_SESSIONS.get(session_id, [])
+
+    # Week 6: 每次请求生成唯一 request_id
+    request_id = str(uuid.uuid4())
+
     try:
-        result = llm_chat(payload.message)
+        result = llm_chat(payload.message, history=history)
+
+        # Week 6: 将本轮对话存入历史（只保留 user/assistant 的文本内容）
+        user_turn = {"role": "user", "content": payload.message}
+        assistant_turn = {"role": "assistant", "content": result["reply"] or "(工具调用，无文字回复)"}
+        history.append(user_turn)
+        history.append(assistant_turn)
+        # 保留最近 _MAX_HISTORY_ROUNDS 轮（每轮 2 条消息）
+        max_msgs = _MAX_HISTORY_ROUNDS * 2
+        if len(history) > max_msgs:
+            history = history[-max_msgs:]
+        _CHAT_SESSIONS[session_id] = history
+
         return {
             "code": 0,
             "reply": result["reply"],
             "tool_used": result["tool_used"],
             "data": result["data"],
+            "request_id": request_id,
+            "session_id": session_id,
             "server_time": time(),
         }
     except RuntimeError as e:
@@ -445,6 +480,75 @@ def api_chat(payload: ChatPayload):
     except Exception as e:
         # 大模型 API 调用失败等
         raise HTTPException(status_code=502, detail=f"LLM 调用失败: {e}")
+
+
+# ---------- Week 5: 语音识别 API ----------
+
+@app.post("/api/speech-to-text")
+async def api_speech_to_text(audio: UploadFile = File(...)):
+    """
+    语音识别接口（Week 5）
+
+    接收前端上传的音频文件，调用 Whisper API 进行语音转文字。
+
+    环境变量:
+      OPENAI_API_KEY       — 必填
+      OPENAI_BASE_URL      — 可选（用于 Whisper，默认 OpenAI 官方）
+      WHISPER_BASE_URL     — 可选（单独指定 Whisper 的 API 地址）
+      WHISPER_API_KEY      — 可选（单独指定 Whisper 的 API Key）
+      WHISPER_MODEL        — 可选，模型名（默认 whisper-1）
+
+    curl 测试:
+    curl -X POST http://localhost:8000/api/speech-to-text \
+      -F "audio=@test.webm;type=audio/webm"
+    """
+    from openai import OpenAI
+
+    # Whisper 专用配置，回退到通用配置
+    whisper_key = os.environ.get("WHISPER_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+    whisper_base = os.environ.get("WHISPER_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    whisper_model = os.environ.get("WHISPER_MODEL", "whisper-1")
+
+    if not whisper_key:
+        raise HTTPException(status_code=500, detail="未配置 OPENAI_API_KEY 或 WHISPER_API_KEY")
+
+    kwargs = {"api_key": whisper_key}
+    if whisper_base:
+        kwargs["base_url"] = whisper_base
+
+    client = OpenAI(**kwargs)
+
+    # 读取上传的音频数据
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="音频文件为空")
+
+    # 确定文件名后缀（从 content_type 推断）
+    suffix = ".webm"
+    ct = audio.content_type or ""
+    if "wav" in ct:
+        suffix = ".wav"
+    elif "mp3" in ct or "mpeg" in ct:
+        suffix = ".mp3"
+    elif "ogg" in ct:
+        suffix = ".ogg"
+    elif "m4a" in ct or "mp4" in ct:
+        suffix = ".m4a"
+
+    import io
+    audio_file = io.BytesIO(audio_bytes)
+    audio_file.name = f"audio{suffix}"  # OpenAI SDK 需要 name 属性
+
+    try:
+        transcript = client.audio.transcriptions.create(
+            model=whisper_model,
+            file=audio_file,
+            language="zh",
+        )
+        text = transcript.text.strip() if hasattr(transcript, "text") else str(transcript)
+        return {"code": 0, "text": text}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"语音识别失败: {e}")
 
 
 # ---------- Web ----------

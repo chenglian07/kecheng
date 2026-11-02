@@ -271,6 +271,15 @@ SYSTEM_PROMPT = """\
 - "停止"、"暂停"、"关闭"、"别发" + "采集/上报/数据" → stop_reporting
 - 其他 → 直接回复，不调用工具
 
+## 澄清规则（Week 6）
+- 当用户的指令意图不明确时（例如只说"查一下"、"弄一下那个"、"帮我看看"、"搞一下"），
+  **不要调用任何工具**，而是主动反问用户以澄清意图。
+- 澄清问题应引导用户明确是要：
+  1. 查看已有的最新数据（对应 get_latest_data）
+  2. 让设备重新采集一次新数据（对应 request_new_collection）
+  3. 开始/停止持续上报数据（对应 start_reporting / stop_reporting）
+- 示例澄清回复："请问您是想查看现有的最新数据，还是想让设备重新采集一次新数据呢？"
+
 ## 回答规范
 - 使用中文回复。
 - 数据值保留 4 位小数。
@@ -283,12 +292,15 @@ SYSTEM_PROMPT = """\
 # 核心对话函数
 # ---------------------------------------------------------------------------
 
-def chat(user_message: str) -> dict:
+def chat(user_message: str, history: list | None = None) -> dict:
     """
     处理用户消息，返回结构化响应。
 
     参数:
         user_message: 用户输入的自然语言文本
+        history: 多轮对话历史（不含 system prompt），格式:
+                 [{"role": "user"|"assistant", "content": "..."}, ...]
+                 Week 6: 由 main.py 中的 session 管理器传入
 
     返回:
         {
@@ -300,10 +312,13 @@ def chat(user_message: str) -> dict:
     client = _get_client()
     model = _get_model()
 
+    # 构建消息列表：system + 历史 + 当前用户消息
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_message},
     ]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user_message})
 
     tool_used = None
     tool_data = None

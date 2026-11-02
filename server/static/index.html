@@ -103,6 +103,27 @@ tr:hover td{background:#1a1d24}
   color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
 .chat-input button:hover:not(:disabled){filter:brightness(1.1)}
 .chat-input button:disabled{opacity:.45;cursor:not-allowed}
+
+/* Week 5: Mic + TTS */
+.mic-btn{width:40px;height:40px;border:none;border-radius:50%;cursor:pointer;font-size:18px;
+  background:#1e2128;color:#e0e0e0;border:1px solid #2a2d35;transition:all .2s;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center}
+.mic-btn:hover{border-color:#3b82f6;color:#4fc3f7}
+.mic-btn.recording{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border-color:#ef4444;
+  box-shadow:0 0 12px rgba(239,68,68,.5);animation:micPulse .8s infinite alternate}
+@keyframes micPulse{0%{box-shadow:0 0 8px rgba(239,68,68,.4)}100%{box-shadow:0 0 20px rgba(239,68,68,.7)}}
+.mic-btn:disabled{opacity:.4;cursor:not-allowed;animation:none}
+.tts-toggle{background:none;border:none;cursor:pointer;font-size:18px;margin-left:8px;padding:2px 4px;
+  transition:opacity .2s;line-height:1}
+.tts-toggle:hover{opacity:.8}
+.stt-status{font-size:10px;color:#f0a500;padding:4px 12px 0;text-align:center;display:none}
+.stt-status.show{display:block}
+
+/* Week 6: Stop speech button + loading state */
+.stop-btn{background:none;border:1px solid #2a2d35;cursor:pointer;font-size:13px;padding:2px 8px;
+  border-radius:6px;color:#ef4444;margin-left:6px;transition:all .2s;line-height:1}
+.stop-btn:hover{background:#2a0000;border-color:#ef4444}
+.chat-input button.loading{background:linear-gradient(135deg,#6b7280,#4b5563);pointer-events:none}
 </style>
 </head>
 <body>
@@ -531,12 +552,17 @@ function animateThree() {
 <button id="chatFab" class="chat-fab" title="自然语言助手">🤖</button>
 <div id="chatPanel" class="chat-panel">
   <div class="chat-head">
-    <div class="title">🤖 自然语言<span>助手</span></div>
+    <div class="title">🤖 自然语言<span>助手</span>
+      <button id="ttsToggle" class="tts-toggle" title="语音播报开关">🔊</button>
+      <button id="stopSpeech" class="stop-btn" title="立即停止播报">🛑</button>
+    </div>
     <button id="chatClose" class="close" title="关闭">✕</button>
   </div>
   <div id="chatMsgs" class="chat-msgs"></div>
+  <div id="sttStatus" class="stt-status"></div>
   <div class="chat-input">
-    <input id="chatInput" type="text" placeholder="输入消息，如：现在数据多少？" autocomplete="off">
+    <button id="chatMic" class="mic-btn" title="按住说话">🎤</button>
+    <input id="chatInput" type="text" placeholder="输入消息，或按住🎤说话" autocomplete="off">
     <button id="chatSend">发送</button>
   </div>
 </div>
@@ -550,8 +576,20 @@ function animateThree() {
   var msgs=document.getElementById('chatMsgs');
   var input=document.getElementById('chatInput');
   var sendBtn=document.getElementById('chatSend');
+  var micBtn=document.getElementById('chatMic');
+  var ttsToggle=document.getElementById('ttsToggle');
+  var sttStatus=document.getElementById('sttStatus');
+  var stopBtn=document.getElementById('stopSpeech');
   var isOpen=false;
+  var ttsEnabled=true;
 
+  // ===== Week 6: 多轮会话状态 =====
+  var _sessionId=null;          // 服务端分配的 session_id
+  var _latestRequestId=null;    // 当前最新的 request_id（迟到隔离用）
+  var _abortCtrl=null;          // AbortController（中断上一个请求用）
+  var _isSending=false;         // 是否正在等待回复
+
+  // ===== 面板开关 =====
   fab.addEventListener('click',function(){
     isOpen=!isOpen;
     panel.classList.toggle('open',isOpen);
@@ -562,6 +600,29 @@ function animateThree() {
     panel.classList.remove('open');
   });
 
+  // ===== Week 5/6: TTS 语音播报 =====
+  ttsToggle.addEventListener('click',function(){
+    ttsEnabled=!ttsEnabled;
+    ttsToggle.textContent=ttsEnabled?'🔊':'🔇';
+    ttsToggle.title=ttsEnabled?'语音播报: 开启':'语音播报: 静音';
+    if(!ttsEnabled&&window.speechSynthesis) window.speechSynthesis.cancel();
+  });
+  // Week 6: 🛑 立即停止播报
+  stopBtn.addEventListener('click',function(){
+    if(window.speechSynthesis) window.speechSynthesis.cancel();
+    ttsEnabled=false;
+    ttsToggle.textContent='🔇';
+    ttsToggle.title='语音播报: 静音';
+  });
+  function speak(text){
+    if(!ttsEnabled||!window.speechSynthesis)return;
+    window.speechSynthesis.cancel();
+    var plain=text.replace(/<[^>]*>/g,'').replace(/&[^;]+;/g,' ');
+    var utter=new SpeechSynthesisUtterance(plain);
+    utter.lang='zh-CN';utter.rate=1.0;utter.pitch=1.0;
+    window.speechSynthesis.speak(utter);
+  }
+
   function addBubble(text,cls){
     var el=document.createElement('div');
     el.className='chat-bubble '+cls;
@@ -570,11 +631,18 @@ function animateThree() {
     msgs.scrollTop=msgs.scrollHeight;
     return el;
   }
-
   function escapeHtml(s){
     var d=document.createElement('div');
     d.textContent=s;
     return d.innerHTML;
+  }
+  function showSttStatus(msg){sttStatus.textContent=msg;sttStatus.className='stt-status show'}
+  function hideSttStatus(){sttStatus.className='stt-status'}
+  function setLoading(on){
+    _isSending=on;
+    sendBtn.disabled=on;
+    if(on){sendBtn.textContent='⏳ 思考中';sendBtn.classList.add('loading')}
+    else{sendBtn.textContent='发送';sendBtn.classList.remove('loading')}
   }
 
   async function sendChat(){
@@ -582,23 +650,43 @@ function animateThree() {
     if(!text)return;
     addBubble(escapeHtml(text),'user');
     input.value='';
-    sendBtn.disabled=true;
 
+    // Week 6: 取消上一个未完成的请求
+    if(_abortCtrl){_abortCtrl.abort();_abortCtrl=null}
+    _abortCtrl=new AbortController();
+    var myCtrl=_abortCtrl;
+
+    setLoading(true);
     var thinkingEl=addBubble('<span class="thinking">🤖 助手正在思考...</span>','assistant');
 
+    // Week 6: 本次请求的唯一 ID
+    var myReqId='r'+Date.now()+'_'+Math.random().toString(36).substr(2,6);
+    _latestRequestId=myReqId;
+
     try{
+      var payload={message:text};
+      if(_sessionId) payload.session_id=_sessionId;
       var resp=await fetch('/api/chat',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({message:text})
+        body:JSON.stringify(payload),
+        signal:myCtrl.signal
       });
       var body=await resp.json();
+
+      // Week 6: 迟到隔离 — 不是最新请求则丢弃
+      if(myReqId!==_latestRequestId){
+        console.log('[Chat] 丢弃迟到响应 req='+myReqId);
+        thinkingEl.remove();setLoading(false);return;
+      }
       if(!resp.ok){
         thinkingEl.className='chat-bubble error';
         thinkingEl.innerHTML='❌ 请求失败: '+(body.detail||resp.status);
-        sendBtn.disabled=false;
-        return;
+        setLoading(false);return;
       }
+      // Week 6: 保存 session_id
+      if(body.session_id) _sessionId=body.session_id;
+
       // 构建回复内容
       var html=escapeHtml(body.reply||'(无回复)');
       if(body.tool_used==='get_latest_data'){
@@ -609,19 +697,23 @@ function animateThree() {
         setTimeout(function(){fetchData();},7000);
       }else if(body.tool_used==='start_reporting'){
         html+='<div class="tool-tag">▶️ 已下发开始指令</div>';
-        // 同步前端"实时更新"按钮为开启状态
         if(!_autoRefresh){toggleAutoRefresh();}
       }else if(body.tool_used==='stop_reporting'){
         html+='<div class="tool-tag">⏸️ 已下发暂停指令</div>';
-        // 同步前端"实时更新"按钮为暂停状态
         if(_autoRefresh){toggleAutoRefresh();}
       }
       thinkingEl.innerHTML=html;
+      speak(body.reply||'');
     }catch(err){
+      if(err.name==='AbortError'){
+        thinkingEl.remove();setLoading(false);return;
+      }
       thinkingEl.className='chat-bubble error';
-      thinkingEl.innerHTML='❌ 网络错误: '+err.message;
+      thinkingEl.innerHTML='❌ '+(err.message.indexOf('Failed to fetch')>=0
+        ?'网络连接失败，请检查服务是否运行中':'网络错误: '+err.message);
     }finally{
-      sendBtn.disabled=false;
+      setLoading(false);
+      if(_abortCtrl===myCtrl) _abortCtrl=null;
       input.focus();
     }
   }
@@ -634,8 +726,88 @@ function animateThree() {
     }
   });
 
+  // ===== Week 5: 语音录音 (MediaRecorder) =====
+  var _mediaRecorder=null,_audioChunks=[],_isRecording=false;
+
+  function getMimeType(){
+    var types=['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+    for(var i=0;i<types.length;i++){
+      if(window.MediaRecorder&&MediaRecorder.isTypeSupported(types[i]))return types[i];
+    }
+    return '';
+  }
+
+  async function startRecording(){
+    if(_isRecording)return;
+    try{
+      var stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+      var mime=getMimeType();
+      _mediaRecorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+      _audioChunks=[];
+      _mediaRecorder.ondataavailable=function(e){if(e.data&&e.data.size>0)_audioChunks.push(e.data)};
+      _mediaRecorder.onstop=function(){
+        stream.getTracks().forEach(function(t){t.stop()});
+        if(_audioChunks.length===0){
+          showSttStatus('⚠️ 录音数据为空');setTimeout(hideSttStatus,2000);
+          micBtn.classList.remove('recording');micBtn.disabled=false;_isRecording=false;return;
+        }
+        var blob=new Blob(_audioChunks,{type:_mediaRecorder.mimeType||'audio/webm'});
+        uploadAudio(blob);
+      };
+      _mediaRecorder.start();
+      _isRecording=true;
+      micBtn.classList.add('recording');
+      showSttStatus('🔴 录音中... 松开结束');
+    }catch(err){
+      showSttStatus('❌ 无法访问麦克风: '+err.message);
+      setTimeout(hideSttStatus,3000);
+    }
+  }
+
+  function stopRecording(){
+    if(!_isRecording||!_mediaRecorder)return;
+    _isRecording=false;
+    micBtn.classList.remove('recording');
+    _mediaRecorder.stop();
+  }
+
+  async function uploadAudio(blob){
+    micBtn.disabled=true;
+    showSttStatus('⏳ 正在识别语音...');
+    try{
+      var fd=new FormData();
+      fd.append('audio',blob,'recording.webm');
+      var resp=await fetch('/api/speech-to-text',{method:'POST',body:fd});
+      var body=await resp.json();
+      if(!resp.ok){
+        showSttStatus('❌ 识别失败: '+(body.detail||resp.status));
+        setTimeout(hideSttStatus,3000);micBtn.disabled=false;return;
+      }
+      var text=(body.text||'').trim();
+      if(!text){
+        showSttStatus('⚠️ 未识别到有效文字');
+        setTimeout(hideSttStatus,2000);micBtn.disabled=false;return;
+      }
+      hideSttStatus();
+      input.value=text;
+      sendChat();
+    }catch(err){
+      showSttStatus('❌ 上传失败: '+err.message);
+      setTimeout(hideSttStatus,3000);
+    }finally{micBtn.disabled=false}
+  }
+
+  // 鼠标按住录音
+  micBtn.addEventListener('mousedown',function(e){e.preventDefault();startRecording()});
+  micBtn.addEventListener('mouseup',function(e){e.preventDefault();stopRecording()});
+  micBtn.addEventListener('mouseleave',function(){if(_isRecording)stopRecording()});
+  // 触摸事件
+  micBtn.addEventListener('touchstart',function(e){e.preventDefault();startRecording()});
+  micBtn.addEventListener('touchend',function(e){e.preventDefault();stopRecording()});
+  micBtn.addEventListener('touchcancel',function(){if(_isRecording)stopRecording()});
+
   // 首次打开时显示欢迎消息
-  addBubble('你好！我是 EgoLink 智能助手 🤖<br>你可以问我：<br>• "现在的数据是多少？"<br>• "帮我重新采集一次"<br>• "开始采集" / "停止采集"','assistant');
+  addBubble('你好！我是 EgoLink 智能助手 🤖<br>你可以：<br>• 打字或按住 🎤 说话<br>• "现在的数据是多少？"<br>• "帮我重新采集一次"<br>• "开始采集" / "停止采集"','assistant');
 })();
 </script>
 </body>
